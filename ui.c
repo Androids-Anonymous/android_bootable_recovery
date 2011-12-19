@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/reboot.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -30,6 +29,7 @@
 #include <unistd.h>
 
 #include "common.h"
+#include <cutils/android_reboot.h>
 #include "minui/minui.h"
 #include "recovery_ui.h"
 
@@ -54,6 +54,8 @@ static int gShowBackButton = 0;
   #define CHAR_WIDTH 7
   #define CHAR_HEIGHT 16
 #endif
+
+#define UI_WAIT_KEY_TIMEOUT_SEC    3600
 
 UIParameters ui_parameters = {
     6,       // indeterminate progress bar frames
@@ -205,8 +207,8 @@ static void draw_text_line(int row, const char* t) {
   }
 }
 
-//#define MENU_TEXT_COLOR 0, 191, 255, 255
-#define MENU_TEXT_COLOR 60, 255, 110, 255
+//#define MENU_TEXT_COLOR 255, 160, 49, 255
+#define MENU_TEXT_COLOR 0, 191, 255, 255
 #define NORMAL_TEXT_COLOR 200, 200, 200, 255
 #define HEADER_TEXT_COLOR NORMAL_TEXT_COLOR
 
@@ -300,7 +302,8 @@ static void *progress_thread(void *cookie)
         // update the installation animation, if active
         // skip this if we have a text overlay (too expensive to update)
         if (gCurrentIcon == BACKGROUND_ICON_INSTALLING &&
-            ui_parameters.installing_frames > 0) {
+            ui_parameters.installing_frames > 0 &&
+            !show_text) {
             gInstallingFrame =
                 (gInstallingFrame + 1) % ui_parameters.installing_frames;
             redraw = 1;
@@ -336,70 +339,83 @@ static void *progress_thread(void *cookie)
     return NULL;
 }
 
+static int rel_sum = 0;
+
+static int input_callback(int fd, short revents, void *data)
+{
+    struct input_event ev;
+    int ret;
+    int fake_key = 0;
+
+    ret = ev_get_input(fd, revents, &ev);
+    if (ret)
+        return -1;
+
+    if (ev.type == EV_SYN) {
+        return 0;
+    } else if (ev.type == EV_REL) {
+        if (ev.code == REL_Y) {
+            // accumulate the up or down motion reported by
+            // the trackball.  When it exceeds a threshold
+            // (positive or negative), fake an up/down
+            // key event.
+            rel_sum += ev.value;
+            if (rel_sum > 3) {
+                fake_key = 1;
+                ev.type = EV_KEY;
+                ev.code = KEY_DOWN;
+                ev.value = 1;
+                rel_sum = 0;
+            } else if (rel_sum < -3) {
+                fake_key = 1;
+                ev.type = EV_KEY;
+                ev.code = KEY_UP;
+                ev.value = 1;
+                rel_sum = 0;
+            }
+        }
+    } else {
+        rel_sum = 0;
+    }
+
+    if (ev.type != EV_KEY || ev.code > KEY_MAX)
+        return 0;
+
+    pthread_mutex_lock(&key_queue_mutex);
+    if (!fake_key) {
+        // our "fake" keys only report a key-down event (no
+        // key-up), so don't record them in the key_pressed
+        // table.
+        key_pressed[ev.code] = ev.value;
+    }
+    const int queue_max = sizeof(key_queue) / sizeof(key_queue[0]);
+    if (ev.value > 0 && key_queue_len < queue_max) {
+        key_queue[key_queue_len++] = ev.code;
+        pthread_cond_signal(&key_queue_cond);
+    }
+    pthread_mutex_unlock(&key_queue_mutex);
+
+    if (ev.value > 0 && device_toggle_display(key_pressed, ev.code)) {
+        pthread_mutex_lock(&gUpdateMutex);
+        show_text = !show_text;
+        if (show_text) show_text_ever = 1;
+        update_screen_locked();
+        pthread_mutex_unlock(&gUpdateMutex);
+    }
+
+    if (ev.value > 0 && device_reboot_now(key_pressed, ev.code)) {
+        android_reboot(ANDROID_RB_RESTART, 0, 0);
+    }
+
+    return 0;
+}
+
 // Reads input events, handles special hot keys, and adds to the key queue.
 static void *input_thread(void *cookie)
 {
-    int rel_sum = 0;
-    int fake_key = 0;
     for (;;) {
-        // wait for the next key event
-        struct input_event ev;
-        do {
-            ev_get(&ev, 0);
-
-            if (ev.type == EV_SYN) {
-                continue;
-            } else if (ev.type == EV_REL) {
-                if (ev.code == REL_Y) {
-                    // accumulate the up or down motion reported by
-                    // the trackball.  When it exceeds a threshold
-                    // (positive or negative), fake an up/down
-                    // key event.
-                    rel_sum += ev.value;
-                    if (rel_sum > 3) {
-                        fake_key = 1;
-                        ev.type = EV_KEY;
-                        ev.code = KEY_DOWN;
-                        ev.value = 1;
-                        rel_sum = 0;
-                    } else if (rel_sum < -3) {
-                        fake_key = 1;
-                        ev.type = EV_KEY;
-                        ev.code = KEY_UP;
-                        ev.value = 1;
-                        rel_sum = 0;
-                    }
-                }
-            } else {
-                rel_sum = 0;
-            }
-        } while (ev.type != EV_KEY || ev.code > KEY_MAX);
-
-        pthread_mutex_lock(&key_queue_mutex);
-        if (!fake_key) {
-            // our "fake" keys only report a key-down event (no
-            // key-up), so don't record them in the key_pressed
-            // table.
-            key_pressed[ev.code] = ev.value;
-        }
-        fake_key = 0;
-        const int queue_max = sizeof(key_queue) / sizeof(key_queue[0]);
-        if (ev.value > 0 && key_queue_len < queue_max) {
-            key_queue[key_queue_len++] = ev.code;
-            pthread_cond_signal(&key_queue_cond);
-        }
-        pthread_mutex_unlock(&key_queue_mutex);
-
-        if (ev.value > 0 && device_toggle_display(key_pressed, ev.code)) {
-            pthread_mutex_lock(&gUpdateMutex);
-            show_text = !show_text;
-            update_screen_locked();
-            pthread_mutex_unlock(&gUpdateMutex);
-        }
-
-        if (ev.value > 0 && device_reboot_now(key_pressed, ev.code)) {
-            reboot(RB_AUTOBOOT);
-        }
+        if (!ev_wait(-1))
+            ev_dispatch();
     }
     return NULL;
 }
@@ -408,7 +424,7 @@ void ui_init(void)
 {
     ui_has_initialized = 1;
     gr_init();
-    ev_init();
+    ev_init(input_callback, NULL);
 
     text_col = text_row = 0;
     text_rows = gr_fb_height() / CHAR_HEIGHT;
@@ -472,7 +488,7 @@ void ui_init(void)
 
 char *ui_copy_image(int icon, int *width, int *height, int *bpp) {
     pthread_mutex_lock(&gUpdateMutex);
-    draw_background_locked(icon);
+    draw_background_locked(gBackgroundIcon[icon]);
     *width = gr_fb_width();
     *height = gr_fb_height();
     *bpp = sizeof(gr_pixel) * 8;
@@ -726,12 +742,29 @@ static int usb_connected() {
 int ui_wait_key()
 {
     pthread_mutex_lock(&key_queue_mutex);
-    while (key_queue_len == 0) {
-        pthread_cond_wait(&key_queue_cond, &key_queue_mutex);
-    }
 
-    int key = key_queue[0];
-    memcpy(&key_queue[0], &key_queue[1], sizeof(int) * --key_queue_len);
+    // Time out after UI_WAIT_KEY_TIMEOUT_SEC, unless a USB cable is
+    // plugged in.
+    do {
+        struct timeval now;
+        struct timespec timeout;
+        gettimeofday(&now, NULL);
+        timeout.tv_sec = now.tv_sec;
+        timeout.tv_nsec = now.tv_usec * 1000;
+        timeout.tv_sec += UI_WAIT_KEY_TIMEOUT_SEC;
+
+        int rc = 0;
+        while (key_queue_len == 0 && rc != ETIMEDOUT) {
+            rc = pthread_cond_timedwait(&key_queue_cond, &key_queue_mutex,
+                                        &timeout);
+        }
+    } while (usb_connected() && key_queue_len == 0);
+
+    int key = -1;
+    if (key_queue_len > 0) {
+        key = key_queue[0];
+        memcpy(&key_queue[0], &key_queue[1], sizeof(int) * --key_queue_len);
+    }
     pthread_mutex_unlock(&key_queue_mutex);
     return key;
 }

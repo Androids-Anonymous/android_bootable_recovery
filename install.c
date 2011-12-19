@@ -103,6 +103,8 @@ handle_firmware_update(char* type, char* filename, ZipArchive* zip) {
     return INSTALL_SUCCESS;
 }
 
+static const char *LAST_INSTALL_FILE = "/cache/recovery/last_install";
+
 // If the package contains an update binary, extract it and run it.
 static int
 try_update_binary(const char *path, ZipArchive *zip) {
@@ -123,8 +125,7 @@ try_update_binary(const char *path, ZipArchive *zip) {
         return INSTALL_UPDATE_BINARY_MISSING;
     }
 
-    char* binary = "/sbin/update_binary";
-    /* Don't overwrite the binary -- special protections
+    char* binary = "/tmp/update_binary";
     unlink(binary);
     int fd = creat(binary, 0755);
     if (fd < 0) {
@@ -140,7 +141,6 @@ try_update_binary(const char *path, ZipArchive *zip) {
         mzCloseZipArchive(zip);
         return 1;
     }
-    */
 
     int pipefd[2];
     pipe(pipefd);
@@ -334,8 +334,8 @@ exit:
     return NULL;
 }
 
-int
-install_package(const char *path)
+static int
+really_install_package(const char *path)
 {
     ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_print("Finding update package...\n");
@@ -387,6 +387,25 @@ install_package(const char *path)
     /* Verify and install the contents of the package.
      */
     ui_print("Installing update...\n");
-    err = try_update_binary(path, &zip);
-    return err;
+    return try_update_binary(path, &zip);
+}
+
+int
+install_package(const char* path)
+{
+    FILE* install_log = fopen_path(LAST_INSTALL_FILE, "w");
+    if (install_log) {
+        fputs(path, install_log);
+        fputc('\n', install_log);
+    } else {
+        LOGE("failed to open last_install: %s\n", strerror(errno));
+    }
+    int result = really_install_package(path);
+    if (install_log) {
+        fputc(result == INSTALL_SUCCESS ? '1' : '0', install_log);
+        fputc('\n', install_log);
+        fclose(install_log);
+        chmod(LAST_INSTALL_FILE, 0644);
+    }
+    return result;
 }

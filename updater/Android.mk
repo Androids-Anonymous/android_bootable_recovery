@@ -19,14 +19,6 @@ LOCAL_MODULE_TAGS := eng
 
 LOCAL_SRC_FILES := $(updater_src_files)
 
-BOARD_RECOVERY_DEFINES := BOARD_NONSAFE_SYSTEM_DEVICE
-
-$(foreach board_define,$(BOARD_RECOVERY_DEFINES), \
-  $(if $($(board_define)), \
-    $(eval LOCAL_CFLAGS += -D$(board_define)=\"$($(board_define))\") \
-  ) \
-  )
-
 ifeq ($(TARGET_USERIMAGES_USE_EXT4), true)
 LOCAL_CFLAGS += -DUSE_EXT4
 LOCAL_C_INCLUDES += system/extras/ext4_utils
@@ -38,6 +30,7 @@ LOCAL_STATIC_LIBRARIES += libflashutils libmtdutils libmmcutils libbmlutils
 LOCAL_STATIC_LIBRARIES += $(TARGET_RECOVERY_UPDATER_LIBS) $(TARGET_RECOVERY_UPDATER_EXTRA_LIBS)
 LOCAL_STATIC_LIBRARIES += libapplypatch libedify libmtdutils libminzip libz
 LOCAL_STATIC_LIBRARIES += libmincrypt libbz
+LOCAL_STATIC_LIBRARIES += libminelf
 LOCAL_STATIC_LIBRARIES += libcutils libstdc++ libc
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/..
 
@@ -68,9 +61,9 @@ $(inc) : libs := $(TARGET_RECOVERY_UPDATER_LIBS)
 $(inc) : $(inc).list
 	$(hide) mkdir -p $(dir $@)
 	$(hide) echo "" > $@
-	$(hide) $(foreach lib,$(libs),echo "extern void Register_$(lib)(void);" >> $@)
+	$(hide) $(foreach lib,$(libs),echo "extern void Register_$(lib)(void);" >> $@;)
 	$(hide) echo "void RegisterDeviceExtensions() {" >> $@
-	$(hide) $(foreach lib,$(libs),echo "  Register_$(lib)();" >> $@)
+	$(hide) $(foreach lib,$(libs),echo "  Register_$(lib)();" >> $@;)
 	$(hide) echo "}" >> $@
 
 $(call intermediates-dir-for,EXECUTABLES,updater)/updater.o : $(inc)
@@ -81,9 +74,3 @@ LOCAL_MODULE := updater
 LOCAL_FORCE_STATIC_EXECUTABLE := true
 
 include $(BUILD_EXECUTABLE)
-
-
-file := $(PRODUCT_OUT)/utilities/update-binary
-ALL_PREBUILT += $(file)
-$(file) : $(TARGET_OUT)/bin/updater | $(ACP)
-	$(transform-prebuilt-to-target)
