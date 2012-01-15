@@ -478,7 +478,7 @@ get_menu_selection(char** headers, char** items, int menu_only,
         int key = ui_wait_key();
         int visible = ui_text_visible();
 
-        int action = device_handle_key(key, visible);
+        int action = device_handle_key(key /*, visible*/);
 
         int old_selected = selected;
 
@@ -783,7 +783,6 @@ prompt_and_wait() {
                 safemode = get_safe_mode();
                 break;
             case ITEM_CONSOLE:
-		LOGI("Checking if /system mounted properly: %d \n",ensure_path_mounted_at_mount_point("/system", "/system"));
 		show_console_menu();
             	break;
             case ITEM_POWEROFF:

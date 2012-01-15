@@ -36,7 +36,7 @@
 
 #include "common.h"
 #include "roots.h"
-#include "minui.h"
+#include "minui/minui.h"
 #include "recovery_ui.h"
 
 extern int __system(const char *command);
@@ -55,8 +55,6 @@ static int gShowBackButton = 0;
 
 #define CHAR_WIDTH 10
 #define CHAR_HEIGHT 18
-#define CHAR_WIDTH 7
-#define CHAR_HEIGHT 16
 
 #define LED_OFF   	0x00
 #define LED_ON		0x01
@@ -64,10 +62,10 @@ static int gShowBackButton = 0;
 #define LED_BLINK_ONCE	0x03
 
 #define LED_FILE_RED		"/sys/class/leds/red/brightness"
-#define LED_FILE_GREEN	"/sys/class/leds/green/brightness"
+#define LED_FILE_GREEN		"/sys/class/leds/green/brightness"
 #define LED_FILE_BLUE		"/sys/class/leds/blue/brightness"
 
-#define KEYBOARD_BACKLIGHT_FILE 	"/sys/class/leds/kpd_backlight_en/brightness"
+#define KEYBOARD_BACKLIGHT_FILE	"/sys/class/leds/kpd_backlight_en/brightness"
 
 // Console UI
 #define CONSOLE_CHAR_WIDTH 10
@@ -127,7 +125,7 @@ static int ui_log_stdout = 1;
 
 static pthread_cond_t led_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t led_mutex = PTHREAD_MUTEX_INITIALIZER;
-static color24 led_color = {.r = 1, .g = 0, .b = 0};
+static color24 led_color = {.r = 0, .g = 0, .b = 1};
 static volatile unsigned int led_sts;
 
 static const struct { gr_surface* surface; const char *name; } BITMAPS[] = {
@@ -230,7 +228,7 @@ static volatile clock_t console_cursor_last_update_time = 0;
 // Key event input queue
 static pthread_mutex_t key_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t key_queue_cond = PTHREAD_COND_INITIALIZER;
-static int key_queue[256], key_queue_len = 0;
+static int key_queue[2], key_queue_len = 0;
 static volatile char key_pressed[KEY_MAX + 1];
 
 // Return the current time as a double (including fractions of a second).
@@ -322,12 +320,6 @@ static void draw_text_line(int row, const char* t) {
   }
 }
 
-//#define MENU_TEXT_COLOR 0, 191, 255, 255
-//#define MENU_TEXT_COLOR 60, 255, 110, 255
-//#define NORMAL_TEXT_COLOR 200, 200, 200, 255
-//#define HEADER_TEXT_COLOR NORMAL_TEXT_COLOR
-//#define BACKGROUND_COLOR 0, 0, 0, 0
-
 static void
 draw_console_cursor(int row, int column, char letter)
 {
@@ -361,15 +353,15 @@ draw_console_line(int row, const char* t, const color24* c) {
   {
   	letter[0] = t[i];
   	gr_color(c[i].r, c[i].g, c[i].b, 255);
-    gr_text_l(i * CONSOLE_CHAR_WIDTH, (row+1)*CONSOLE_CHAR_HEIGHT-1, letter);
-		i++;
+        gr_text_l(i * CONSOLE_CHAR_WIDTH, (row+1)*CONSOLE_CHAR_HEIGHT-1, letter);
+	i++;
   }
 }
 
 static void
 draw_console_locked()
 {
-	gr_color(console_background_color.r, console_background_color.g, console_background_color.b, 255);
+  gr_color(console_background_color.r, console_background_color.g, console_background_color.b, 255);
   gr_fill(0, 0, gr_fb_width(), gr_fb_height());
 
 	int draw_cursor = 0;
@@ -382,7 +374,8 @@ draw_console_locked()
 		if (i == console_cur_row)
 		{
 			draw_cursor = 1;
-			break;
+			//break;
+			continue;
 		}
 	}
 
@@ -398,8 +391,7 @@ static void draw_screen_locked(void)
 	if (show_console)
   	  {
 	  if (console_refresh)
-   			draw_console_locked();
-
+   		draw_console_locked();
   		return;
   	  }
 
@@ -544,8 +536,8 @@ led_thread(void *cookie)
   FILE *ledfp_r, *ledfp_g, *ledfp_b;
   
   ledfp_r = fopen(LED_FILE_RED, "w");
-	ledfp_g = fopen(LED_FILE_GREEN, "w");
-	ledfp_b = fopen(LED_FILE_BLUE, "w");
+  ledfp_g = fopen(LED_FILE_GREEN, "w");
+  ledfp_b = fopen(LED_FILE_BLUE, "w");
 
   while(1) 
   {
@@ -658,72 +650,105 @@ static void *progress_thread(void *cookie)
 }
 
 // Reads input events, handles special hot keys, and adds to the key queue.
-static void *input_thread(void *cookie)
+static void *
+input_thread (void *cookie) 
 {
-    int rel_sum = 0;
-    int fake_key = 0;
-    for (;;) {
-        // wait for the next key event
-        struct input_event ev;
-        do {
-            ev_get(&ev, 0);
+  int rel_sum = 0;
+  int fake_key = 0;
+  int last_code = 0;
+  unsigned keyheld;
 
-            if (ev.type == EV_SYN) {
-                continue;
-            } else if (ev.type == EV_REL) {
-                if (ev.code == REL_Y) {
-                    // accumulate the up or down motion reported by
-                    // the trackball.  When it exceeds a threshold
-                    // (positive or negative), fake an up/down
-                    // key event.
-                    rel_sum += ev.value;
-                    if (rel_sum > 3) {
-                        fake_key = 1;
-                        ev.type = EV_KEY;
-                        ev.code = KEY_DOWN;
-                        ev.value = 1;
-                        rel_sum = 0;
-                    } else if (rel_sum < -3) {
-                        fake_key = 1;
-                        ev.type = EV_KEY;
-                        ev.code = KEY_UP;
-                        ev.value = 1;
-                        rel_sum = 0;
-                    }
-                }
-            } else {
-                rel_sum = 0;
-            }
-        } while (ev.type != EV_KEY || ev.code > KEY_MAX);
+  for (;;)
+	  {
+	    
+	      // wait for the next key event
+	    struct input_event ev;
 
-        pthread_mutex_lock(&key_queue_mutex);
-        if (!fake_key) {
-            // our "fake" keys only report a key-down event (no
-            // key-up), so don't record them in the key_pressed
-            // table.
-            key_pressed[ev.code] = ev.value;
-        }
-        fake_key = 0;
-        const int queue_max = sizeof(key_queue) / sizeof(key_queue[0]);
-        if (ev.value > 0 && key_queue_len < queue_max) {
-            key_queue[key_queue_len++] = ev.code;
-            pthread_cond_signal(&key_queue_cond);
-        }
-        pthread_mutex_unlock(&key_queue_mutex);
+	    
+	    do
+		    {
+		    int repeat = ev_get(&ev, 0, keyheld);
+		    
+		    if (repeat != 1) {
+				
+			if (ev.type == EV_SYN){break;}
+			
+			// Check for an up/down key press
+			if (ev.type == EV_KEY && ev.value == 1 ) {
+				keyheld = 1;
+				last_code = ev.code;
+			} else { 
+				keyheld = 0;
+			}
+		    } else if ( (ev.code == KEY_VOLUMEUP) || (ev.code == KEY_VOLUMEDOWN) || (ev.code == KEY_CENTER) ){
+			ev.type = EV_KEY;
+			ev.code = KEY_HP;
+			ev.value = 1;
+			continue;
+		    } else { 
+			// A return value of 1 means the last key should be repeated
+			ev.type = EV_KEY;
+			ev.code = last_code;
+			ev.value = 1;
+		    } 
 
-        /*if (ev.value > 0 && device_toggle_display(key_pressed, ev.code)) {
-            pthread_mutex_lock(&gUpdateMutex);
-            show_text = !show_text;
-            update_screen_locked();
-            pthread_mutex_unlock(&gUpdateMutex);
-        }
+		    if (ev.type == EV_REL)
+		    {
+			if (ev.code == REL_Y)
+			{
+					  
+					  // accumulate the up or down motion reported by
+					  // the trackball.  When it exceeds a threshold
+					  // (positive or negative), fake an up/down
+					  // key event.
+					  rel_sum += ev.value;
+					  if (rel_sum > 3)
+						  {
+						    fake_key = 1;
+						    ev.type = EV_KEY;
+						    ev.code = KEY_VOLUMEDOWN;
+						    ev.value = 1;
+						    rel_sum = 0;
+						  }
+					  else if (rel_sum < -3)
+						  {
+						    fake_key = 1;
+						    ev.type = EV_KEY;
+						    ev.code = KEY_VOLUMEUP;
+						    ev.value = 1;
+						    rel_sum = 0;
+						  }
+					}
+			      } else if (ev.type == EV_ABS && (ev.code == KEY_VOLUMEUP || ev.code == KEY_VOLUMEDOWN)) {
+			        fake_key = 1;
+				ev.type = EV_KEY;
+			      } else {
+				rel_sum = 0;
+			      }
+		    }
+	    while (ev.type != EV_KEY || ev.code > KEY_MAX);
+	     pthread_mutex_lock (&key_queue_mutex);
+	    if (!fake_key)
+		    {
+		      
+			// our "fake" keys only report a key-down event (no
+			// key-up), so don't record them in the key_pressed
+			// table.
+			key_pressed[ev.code] = ev.value;
+		    }
+	    fake_key = 0;
+	    const int queue_max = sizeof (key_queue) / sizeof (key_queue[0]);
 
-        if (ev.value > 0 && device_reboot_now(key_pressed, ev.code)) {
-            reboot(RB_AUTOBOOT);
-        }*/
-    }
-    return NULL;
+	    if (ev.value > 0 && key_queue_len < queue_max)
+		    {
+		      key_queue[key_queue_len++] = ev.code;
+		      pthread_cond_signal (&key_queue_cond);
+		    }
+	    pthread_mutex_unlock (&key_queue_mutex);
+	  }
+  return NULL;
 }
+
 
 static void*
 console_cursor_thread(void *cookie)
@@ -750,6 +775,7 @@ console_cursor_thread(void *cookie)
 void ui_init(void)
 {
     ui_has_initialized = 1;
+    fprintf(stderr,"ui has initialized.\n");
     gr_init();
     ev_init();
 
@@ -1067,21 +1093,12 @@ void ui_show_text(int visible)
 static int usb_connected() {
     int fd = open("/sys/devices/platform/cpcap_usb_connected", O_RDONLY);
     if (fd < 0) {
-        LOGI("failed to open /sys/devices/platform/cpcap_usb_connected: %s\n",
-               strerror(errno));
+        fprintf(stderr,"Failed to open /sys/devices/platform/cpcap_usb_connected\n");
         return 0;
+    } else {
+        fprintf(stderr,"USB detected, fd=%d\n",fd);
+        return fd;
     }
-
-    char buf;
-    /* USB is connected if android_usb state is CONNECTED or CONFIGURED */
-    int connected = (read(fd, &buf, 1) == 1) && (buf == 'C');
-    if (close(fd) < 0) {
-        LOGI("failed to close /sys/devices/platform/cpcap_usb_connected: %s\n",
-               strerror(errno));
-    }
-    if (connected){
-     return connected;
-    } else return fd;
 }
 
 int ui_wait_key()
@@ -1123,7 +1140,7 @@ int ui_get_showing_back_button() {
 
 int ui_get_num_columns()
 {
-	return text_cols;
+return text_cols;
 }
 
 void ui_console_begin()
@@ -1132,7 +1149,9 @@ void ui_console_begin()
     	FILE* keyboardfd = fopen(KEYBOARD_BACKLIGHT_FILE, "w");
     	fwrite("1", 1, 1, keyboardfd);
     	fclose(keyboardfd);
-    	
+        
+	//check to see if usb is connected, output results to log
+	usb_connected();	
 	pthread_mutex_lock(&gUpdateMutex);
 	show_console = 1;
 	console_refresh = 1;
@@ -1146,7 +1165,7 @@ void ui_console_begin()
 	//calculate the number of columns and rows
 	console_screen_rows = ui_console_get_height() / CONSOLE_CHAR_HEIGHT;
 	console_screen_columns = ui_console_get_width() / CONSOLE_CHAR_WIDTH + 1; //+1 for null terminator
-
+	fprintf(stderr,"rows=%d, cols=%d\n",console_screen_rows,console_screen_columns);
 	console_force_top_row_on_text = 0;
 	console_force_top_row_reserve = 1 - console_screen_rows;
 
@@ -1379,6 +1398,7 @@ console_put_char(char c)
 
 		case CONSOLE_BEEP: //BELL - use LED for that
 			ui_led_blink(0);
+			vibrate(30);
 			break;
 
 		default:
@@ -1463,9 +1483,6 @@ console_unescape()
 	//was used for indexing, so increment it
 	noParameters++;
 
-	//fprintf(stderr, "ESCAPE: no. Brackets S%d RL%d RR%d, no Question Marks %d, no. params %d, argument %c,\n", noSqrBrackets, noRoundBracketsLeft, noRoundBracketsRight, noQuestionMarks, noParameters, argument);
-	//fprintf(stderr, "PARAMS:");
-
 	int i, j;
 	for (i = 0; i < noParameters; i++)
 		//fprintf(stderr, " %d", parameters[i]);
@@ -1540,6 +1557,7 @@ console_unescape()
 				was_unescaped = 1;
 				break;
 
+			
 			//clear below cursor
 			case 'J':
 				for (j = console_cur_column; j < (console_screen_columns - 1); j++)
@@ -1558,7 +1576,7 @@ console_unescape()
 				}
 				was_unescaped = 1;
 				break;
-
+			
 			//clear from cursor cursor
 			case 'K':
 				if (parameters[0] == 0)
@@ -1594,7 +1612,6 @@ console_unescape()
 
 				was_unescaped = 1;
 				break;
-
 			//======================================================================
 			// LOWERCASE
 			//======================================================================

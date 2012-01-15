@@ -61,6 +61,7 @@
 #define CHAR_KEY_ALTRIGHT 245
 #define CHAR_KEY_SHIFTBS 244
 #define CHAR_KEY_ALTBS 243
+#define CHAR_ESCAPE 242
 
 #define ESC 27
 
@@ -88,7 +89,7 @@ init_keypad_layout()
 
 	qwerty_layout.normal[KEY_A] = 'a';
 	qwerty_layout.shifted[KEY_A] = 'A';
-	qwerty_layout.alternate[KEY_A] = '€';
+	qwerty_layout.alternate[KEY_A] = 'A';
 	
 	qwerty_layout.normal[KEY_B] = 'b';
 	qwerty_layout.shifted[KEY_B] = 'B';
@@ -100,7 +101,7 @@ init_keypad_layout()
 	
 	qwerty_layout.normal[KEY_D] = 'd';
 	qwerty_layout.shifted[KEY_D] = 'D';
-	qwerty_layout.alternate[KEY_D] = '¥';
+	qwerty_layout.alternate[KEY_D] = 'D';
 	
 	qwerty_layout.normal[KEY_E] = 'e';
 	qwerty_layout.shifted[KEY_E] = 'E';
@@ -136,7 +137,7 @@ init_keypad_layout()
 	
 	qwerty_layout.normal[KEY_M] = 'm';
 	qwerty_layout.shifted[KEY_M] = 'M';
-	qwerty_layout.alternate[KEY_M] = '`';
+	qwerty_layout.alternate[KEY_M] = '\'';
 	
 	qwerty_layout.normal[KEY_N] = 'n';
 	qwerty_layout.shifted[KEY_N] = 'N';
@@ -148,7 +149,7 @@ init_keypad_layout()
 	
 	qwerty_layout.normal[KEY_P] = 'p';
 	qwerty_layout.shifted[KEY_P] = 'P';
-	qwerty_layout.alternate[KEY_P] = '...';
+	qwerty_layout.alternate[KEY_P] = '.';
 	
 	qwerty_layout.normal[KEY_Q] = 'q';
 	qwerty_layout.shifted[KEY_Q] = 'Q';
@@ -272,9 +273,12 @@ init_keypad_layout()
 
 	qwerty_layout.normal[KEY_GRAVE] = '`';
 	qwerty_layout.shifted[KEY_GRAVE] = '~';
-	qwerty_layout.alternate[KEY_GRAVE] = '~';		
+	qwerty_layout.alternate[KEY_GRAVE] = '~';
 
-	//you guys are making fun of me here :~///
+	qwerty_layout.normal[KEY_RECORD] = CHAR_ESCAPE;
+	qwerty_layout.shifted[KEY_RECORD] = CHAR_ESCAPE;
+	qwerty_layout.alternate[KEY_RECORD] = CHAR_ESCAPE;		
+
 	//the joystick has key orientation ala portrait
 	qwerty_layout.normal[KEY_UP] = CHAR_KEY_LEFT; 
 	qwerty_layout.shifted[KEY_UP] = CHAR_KEY_LEFT;
@@ -512,8 +516,8 @@ int run_console(const char* command)
 	
 	if (childfd < 0)
 	{
-		exit_console();
-		return CONSOLE_FAILED_START;
+	    exit_console();
+	    return CONSOLE_FAILED_START;
 	}
 	
 	//status for the waitpid	
@@ -521,7 +525,7 @@ int run_console(const char* command)
 	int shell_error = 0;
 	
 	//buffer for pipe
-	char buffer[1024+1];
+	char buffer[5760+1];
 	
 	//set pipe to nonblocking
 	set_nonblocking(childfd);
@@ -537,16 +541,6 @@ int run_console(const char* command)
         sz.ws_ypixel = ui_console_get_height();
         ioctl(childfd, TIOCSWINSZ, &sz);
 	
-	ui_console_set_system_front_color(CONSOLE_HEADER_COLOR);
-	ui_console_print(EXPAND(RECOVERY_VERSION)" Console\r\n");
-	
-	if (current_layout == &azerty_layout)
-		ui_console_print("Keyboard Layout: AZERTY\r\n");
-	else if(current_layout == &qwertz_layout)
-		ui_console_print("Keyboard Layout: QWERTZ\r\n");
-	else
-		ui_console_print("Keyboard Layout: QWERTY\r\n");
-		
 	ui_console_set_system_front_color(CONSOLE_DEFAULT_FRONT_COLOR);
 	int force_quit = 0;
 	
@@ -562,7 +556,7 @@ int run_console(const char* command)
 			break;
 		}
 	
-		int rv = read(childfd, buffer, 1024);		
+		int rv = read(childfd, buffer, 5760);		
 		
 		if (rv <= 0)
 		{
@@ -592,37 +586,40 @@ int run_console(const char* command)
 		int keycode = ui_get_key();
 		if (keycode != -1)
 		{
-			//alt + menu + c --> forcibly terminate bash
-			//TODO: othewise menu acts as ctrl
-			if (ui_key_pressed(KEY_MENU))
+			//"OK" + alt + BACKSPACE --> forcibly terminate bash
+			
+			if (ui_key_pressed(KEY_CENTER))
 			{
 				//ignore menu, shift and alt
-				if (keycode == KEY_MENU || keycode == KEY_LEFTALT || keycode == KEY_RIGHTALT ||
+				if (keycode == KEY_CENTER || keycode == KEY_LEFTALT || keycode == KEY_RIGHTALT ||
 					keycode == KEY_LEFTSHIFT || keycode == KEY_RIGHTSHIFT)
 					continue;
 					
 				char key = evaluate_key(keycode, 0, 0);
 				int alt = ui_key_pressed(KEY_LEFTALT) | ui_key_pressed(KEY_RIGHTALT);
+				int shift = ui_key_pressed(KEY_LEFTSHIFT) | ui_key_pressed(KEY_RIGHTSHIFT);
+				int escape_key[2];
 			
-				if (alt && (key == 'c'))
+				if (alt && (key=='\b'))
 				{
 					force_quit = 1;
 					continue;
 				}
 				
-				char my_esc[2];
-				my_esc[0] = key - 'a' + 1;
-				my_esc[1] = '\0';
-				send_escape_sequence(childfd, my_esc);
+				int ascii_key[2];				
+				
+				if (islower(key)){					
+					ascii_key[0] = toascii(toupper(key) - 'A' + 1);
+				} else ascii_key[0] = toascii(key - 'A' + 1);
+				write(childfd, &ascii_key[0], 1);		
 				continue;
 			}
-		
-			char key = evaluate_key(keycode, ui_key_pressed(KEY_LEFTSHIFT) , ui_key_pressed(KEY_LEFTALT) );
-						
+			
+			char key = evaluate_key(keycode, ui_key_pressed(KEY_LEFTSHIFT) | ui_key_pressed(KEY_RIGHTSHIFT), ui_key_pressed(KEY_LEFTALT) | ui_key_pressed(KEY_RIGHTALT));
+			
 			switch (key)
 			{
 				case 0:
-					fprintf(stderr, "evaluate_key: unhandled keycode %d.\n", keycode);
 					key = 0;
 					break;
 					
@@ -632,15 +629,25 @@ int run_console(const char* command)
 				case CHAR_SCROLL_DOWN:
 					ui_console_scroll_down(1);
 					break;
+					
 				case CHAR_SCROLL_UP:
 					ui_console_scroll_up(1);
 					break;
+					
 				case CHAR_BIG_SCROLL_DOWN:
 					ui_console_scroll_down(8);
 					break;
+					
 				case CHAR_BIG_SCROLL_UP:
 					ui_console_scroll_up(8);
 					break;
+				case CHAR_ESCAPE:
+					{				
+					int escape_key2[2];
+					escape_key2[0] = toascii(ESC);
+					write(childfd, &escape_key2[0], 1);
+					break;
+					}
 				case CHAR_KEY_UP:
 					send_escape_sequence(childfd, "[A");
 					break;
@@ -653,23 +660,13 @@ int run_console(const char* command)
 				case CHAR_KEY_DOWN:	
 					send_escape_sequence(childfd, "[B");
 					break;
-				case CHAR_KEY_ALTBS:
-					send_escape_sequence(childfd, "[J");
-					break;
-				case CHAR_KEY_SHIFTBS:
-					send_escape_sequence(childfd, "[K");
-					break;
-				case CHAR_KEY_ALTLEFT:
-					send_escape_sequence(childfd, "[H");
-					break;								
 				default:
-					fprintf(stderr, "run_console: Received key \"%c\".\n", key);
 					write(childfd, &key, 1);
 					break;
 			}
 		}
-	}
 	
+	}
 	//check exit status
 	if (WIFEXITED(sts)) 
 	{
