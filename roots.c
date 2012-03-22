@@ -244,7 +244,30 @@ int ensure_path_mounted_at_mount_point(const char* path, const char* mount_point
         return result;
     } else {
         // let's try mounting with the mount binary and hope for the best.
-        char mount_cmd[PATH_MAX];
+	char mount_cmd[PATH_MAX];
+	char mount_cmd_umount_systemorig[PATH_MAX];
+	char mount_cmd_mount_systemorig[PATH_MAX];
+        char mount_cmd_umount_proc[PATH_MAX];
+	char mount_cmd_mount_proc[PATH_MAX];
+
+	printf("Trying to mount partition on \"%s\" with mount binary\n", path);
+	
+	if (!(path == NULL)) {
+	  if(strcmp(path, "/systemorig") == 0) {
+	    sprintf(mount_cmd_umount_proc, "umount /proc");
+	    sprintf(mount_cmd_mount_proc, "mount -t proc /dev/proc /proc");
+	    sprintf(mount_cmd_umount_systemorig, "umount %s", path);
+	    sprintf(mount_cmd_mount_systemorig, "mount /dev/block/mmcblk1p21 %s", path);
+	    int proc_umount_res = __system(mount_cmd_umount_proc);
+	    printf("proc umount res: \"%d\"\n", proc_umount_res);
+	    int	proc_mount_res  = __system(mount_cmd_mount_proc);
+	    printf("proc mount res: \"%d\"\n", proc_mount_res);
+	    int systemorig_umount_res = __system(mount_cmd_umount_systemorig);
+	    printf("systemorig umount res: \"%d\"\n", systemorig_umount_res);
+	    return __system(mount_cmd_mount_systemorig);
+	  }
+        }
+		
         sprintf(mount_cmd, "mount %s", path);
         return __system(mount_cmd);
     }

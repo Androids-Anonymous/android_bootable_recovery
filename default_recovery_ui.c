@@ -20,42 +20,80 @@
 #include "common.h"
 #include "extendedcommands.h"
 
-char* MENU_HEADERS[] = { NULL };
+char* MENU_HEADERS[] = { "||    main menu     |/____________________________,/|",
+		         "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			  NULL
+		       };
 
-char* MENU_ITEMS[] = { "reboot system now",
-                       "apply update from sdcard",
-                       "wipe data/factory reset",
-                       "wipe cache partition",
-                       "install zip from sdcard",
-                       "backup and restore",
-                       "mounts and storage",
-                       "advanced",
-                       "safe boot menu",
-                       "power off",
-                       NULL };
+
+char* MENU_ITEMS_SAFE[] = {     "| <1> safe system menu                            |/|",
+				"| <2> reboot                                      |/|",
+				"| <3> power off                                   |/|",
+				"| <4> wipe all user data (factory reset)          |/|",
+				"| <5> wipe cache                                  |/|",
+				"| <6> nandroid menu (backup and restore)          |/|",
+				"| <7> mounts and USB storage                      |/|",
+				"| <8> advanced and debugging menu                 |/|",
+				"| <9> console                                     |/|",
+				"| <0> update/patch menu                           |/|",
+                                NULL };
+
+ char* MENU_ITEMS[] =      {    "| <1> safe system menu                            |/|",
+				"| <2> reboot                                      |/|",
+				"| <3> power off                                   |/|",
+				"| <4> wipe all user data (factory reset)          |/|",
+				"| <5> wipe cache                                  |/|",
+				"| <6> nandroid menu (backup and restore)          |/|",
+				"| <7> mounts and USB storage                      |/|",
+				"| <8> advanced and debugging menu                 |/|",
+				"| <9> console                                     |/|",
+                                NULL };
+
+ char* ADV_MENU_ITEMS_SAFE[] = {"| <1> show log                                    |/|",
+				"| <2> reboot                                      |/|",
+				"| <3> wipe dalvik cache                           |/|",
+				"| <4> wipe battery statistics                     |/|",
+				"| <5> dump log for error reporting                |/|",
+				"| <6> key event test                              |/|",
+				"| <7> fix permissions                             |/|",
+#ifndef BOARD_HAS_SMALL_RECOVERY
+                           	"| <8> partition external SD card                  |/|",
+#ifdef BOARD_HAS_SDCARD_INTERNAL
+#ifndef BOARD_HAS_INTERNAL_PARTITIONS
+                           	"| <9> partition internal SD card                  |/|",
+#endif
+#endif
+#endif
+			   	NULL };
+ 
+ char* ADV_MENU_ITEMS[] = {     "| <1> show log                                    |/|",
+				"| <2> reboot                                      |/|",
+				"| <3> wipe dalvik cache                           |/|",
+				"| <4> wipe battery statistics                     |/|",
+				"| <5> dump log for error reporting                |/|",
+				"| <6> key event test                              |/|",
+				"| <7> fix permissions                             |/|",
+#ifndef BOARD_HAS_SMALL_RECOVERY
+                           	"| <8> partition external SD card                  |/|",
+#ifdef BOARD_HAS_SDCARD_INTERNAL
+#ifndef BOARD_HAS_INTERNAL_PARTITIONS
+                           	"| <9> partition internal SD card                  |/|",
+#endif
+#endif
+#endif
+				"| <0> update/patch non-safe system (DANGEROUS)    |/|",
+                           	NULL };
 
 int device_recovery_start() {
     return 0;
-}
-
-int device_toggle_display(volatile char* key_pressed, int key_code) {
-    int alt = key_pressed[KEY_LEFTALT] || key_pressed[KEY_RIGHTALT];
-    if (alt && key_code == KEY_L)
-        return 1;
-    // allow toggling of the display if the correct key is pressed, and the display toggle is allowed or the display is currently off
-    if (ui_get_showing_back_button()) {
-        return 0;
-        //return get_allow_toggle_display() && (key_code == KEY_HOME || key_code == KEY_MENU || key_code == KEY_END);
-    }
-    return get_allow_toggle_display() && (key_code == KEY_HOME || key_code == KEY_MENU || key_code == KEY_POWER || key_code == KEY_END);
 }
 
 int device_reboot_now(volatile char* key_pressed, int key_code) {
     return 0;
 }
 
-int device_handle_key(int key_code, int visible) {
-    if (visible) {
+int device_handle_key(int key_code) {
+    
         switch (key_code) {
             case KEY_CAPSLOCK:
             case KEY_DOWN:
@@ -73,9 +111,7 @@ int device_handle_key(int key_code, int visible) {
                 if (ui_get_showing_back_button()) {
                     return SELECT_ITEM;
                 }
-                if (!get_allow_toggle_display())
-                    return GO_BACK;
-                break;
+                
             case KEY_LEFTBRACE:
             case KEY_ENTER:
             case BTN_MOUSE:
@@ -91,13 +127,48 @@ int device_handle_key(int key_code, int visible) {
                 if (ui_get_showing_back_button()) {
                     return SELECT_ITEM;
                 }
-                if (!get_allow_toggle_display())
-                    return GO_BACK;
+                
             case KEY_BACK:
                 return GO_BACK;
-        }
-    }
 
+	    case KEY_0:
+		return (SELECT_9-SELECT_OFFSET);
+
+	    case KEY_1:
+		return (SELECT_0-SELECT_OFFSET);
+
+	    case KEY_2:
+		return (SELECT_1-SELECT_OFFSET);
+
+	    case KEY_3:
+		return (SELECT_2-SELECT_OFFSET);
+
+	    case KEY_4:
+		return (SELECT_3-SELECT_OFFSET);
+
+	    case KEY_5:
+		return (SELECT_4-SELECT_OFFSET);
+
+	    case KEY_6:
+		return (SELECT_5-SELECT_OFFSET);
+
+	    case KEY_7:
+		return (SELECT_6-SELECT_OFFSET);
+
+	    case KEY_8:
+		return (SELECT_7-SELECT_OFFSET);
+
+	    case KEY_9:
+		return (SELECT_8-SELECT_OFFSET);
+
+	    case KEY_A:
+		return (SELECT_10-SELECT_OFFSET);
+
+	    case KEY_B:
+		return (SELECT_11-SELECT_OFFSET);
+
+        }
+    
     return NO_ACTION;
 }
 

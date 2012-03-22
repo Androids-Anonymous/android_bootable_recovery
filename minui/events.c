@@ -1,18 +1,18 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+* Copyright (C) 2007 The Android Open Source Project
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,17 +27,30 @@
 
 #include "minui.h"
 
-#define MAX_DEVICES 16
+#define MAX_DEVICES 16 
 
-#define VIBRATOR_TIMEOUT_FILE	"/sys/class/timed_output/vibrator/enable"
-#define VIBRATOR_TIME_MS	50
+#define PRESS_THRESHOLD 10
 
-#define PRESS_THRESHHOLD    10
+#define VIBRATOR_TIMEOUT_FILE "/sys/class/timed_output/vibrator/enable"
 
 #define ABS_MT_POSITION_X 0x35
 #define ABS_MT_POSITION_Y 0x36
 #define ABS_MT_TOUCH_MAJOR 0x30
 #define SYN_MT_REPORT 2
+
+#define NORMAL_DELAY 225
+#define FAST_DELAY 75
+
+// The amount of time in ms to delay before duplicating a held down key.
+int keyhold_delay = NORMAL_DELAY; 
+int vibrator_time_ms = 30;
+
+enum {
+    DOWN_NOT,
+    DOWN_SENT,
+    DOWN_RELEASED,
+};
+
 
 struct virtualkey {
     int scancode;
@@ -58,7 +71,7 @@ struct ev {
     int vk_count;
 
     struct position p, mt_p;
-    int sent, mt_idx;
+    int sent, sent2, mt_idx;
 };
 
 static struct pollfd ev_fds[MAX_DEVICES];
@@ -128,8 +141,8 @@ static int vk_init(struct ev *e)
     vks[len] = '\0';
 
     /* Parse a line like:
-        keytype:keycode:centerx:centery:width:height:keytype2:keycode2:centerx2:...
-    */
+keytype:keycode:centerx:centery:width:height:keytype2:keycode2:centerx2:...
+*/
     for (ts = vks, e->vk_count = 1; *ts; ++ts) {
         if (*ts == ':')
             ++e->vk_count;
@@ -184,12 +197,11 @@ int ev_init(void)
     DIR *dir;
     struct dirent *de;
     int fd;
-
+     
     dir = opendir("/dev/input");
     if(dir != 0) {
         while((de = readdir(dir))) {
-//            fprintf(stderr,"/dev/input/%s\n", de->d_name);
-            if(strncmp(de->d_name,"event",5)) continue;
+	    if(strncmp(de->d_name,"event",5)) continue;
             fd = openat(dirfd(dir), de->d_name, O_RDONLY);
             if(fd < 0) continue;
 
@@ -211,10 +223,12 @@ int ev_init(void)
 void ev_exit(void)
 {
     while (ev_count-- > 0) {
+	
 	if (evs[ev_count].vk_count) {
 		free(evs[ev_count].vks);
 		evs[ev_count].vk_count = 0;
 	}
+
         close(ev_fds[ev_count].fd);
     }
 }
@@ -280,7 +294,7 @@ static int vk_modify(struct ev *e, struct input_event *ev)
             if (e->sent)
                 e->mt_p.pressed = (ev->value > 0);
             else
-                e->mt_p.pressed = (ev->value > PRESS_THRESHHOLD);
+                e->mt_p.pressed = (ev->value > PRESS_THRESHOLD);
             return 0;
         }
 
@@ -314,10 +328,11 @@ static int vk_modify(struct ev *e, struct input_event *ev)
         return 0;
     }
 
+
     if (e->sent) {
-        /* We've already sent a fake key for this touch */
-        return 1;
-    }
+        // We've already sent a fake key for this touch //
+	return 0;
+    } 
 
     /* The screen is being touched on the vk area */
     e->sent = 1;
@@ -330,35 +345,47 @@ static int vk_modify(struct ev *e, struct input_event *ev)
             ev->type = EV_KEY;
             ev->code = e->vks[i].scancode;
             ev->value = 1;
-
-            vibrate(VIBRATOR_TIME_MS);
+	    vibrate(vibrator_time_ms);
             return 0;
         }
     }
 
     return 1;
 }
-
-int ev_get(struct input_event *ev, unsigned dont_wait)
+int ev_get(struct input_event *ev, unsigned dont_wait, unsigned keyheld, unsigned fast)
 {
     int r;
     unsigned n;
 
     do {
-        r = poll(ev_fds, ev_count, dont_wait ? 0 : -1);
-
-        if(r > 0) {
-            for(n = 0; n < ev_count; n++) {
+        // When keyheld is true, the previous event
+        // was an up/down keypress so wait keyhold_delay.
+	if(fast) {
+	    keyhold_delay = FAST_DELAY;	
+	} else {
+            keyhold_delay = NORMAL_DELAY;
+	}
+	r = poll(ev_fds, ev_count, dont_wait ? 0 : keyheld ? keyhold_delay : -1);
+        
+	if(r > 0) {
+	    for(n = 0; n < ev_count; n++) {
                 if(ev_fds[n].revents & POLLIN) {
                     r = read(ev_fds[n].fd, ev, sizeof(*ev));
-                    if(r == sizeof(*ev)) {
+		    if(r == sizeof(*ev)) {
                         if (!vk_modify(&evs[n], ev))
-                            return 0;
+			    return 0;
                     }
                 }
             }
+	    
+        }  if (r == 0 ) {
+            // If a timeout occurred when keyheld was set, let the
+            // caller know so it can generate a repeated event.
+	    return 1;
         }
     } while(dont_wait == 0);
 
     return -1;
 }
+
+

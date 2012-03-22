@@ -500,7 +500,8 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
 
     if (0 != (ret = ensure_path_mounted(mount_point))) {
         ui_print("Can't mount %s!\n", mount_point);
-        return ret;
+        ui_print("Error: ensure_path_mounted(%s) returned \"%d\"\n", mount_point, ret);
+	return ret;
     }
 
     if (restore_handler == NULL)
@@ -551,7 +552,7 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
 }
 
 int nandroid_restore(const char* backup_path,
-    int restore_boot, int restore_system, int restore_data, int restore_cache, int restore_sdext, int restore_wimax, int restore_osh, int restore_systemorig)
+     int restore_system, int restore_data, int restore_cache, int restore_systemorig)
 {
     ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_show_indeterminate_progress();
@@ -574,42 +575,10 @@ int nandroid_restore(const char* backup_path,
     
     int ret;
 
-#ifndef BOARD_HAS_LOCKED_BOOTLOADER
-    if (restore_boot && NULL != volume_for_path("/boot") && 0 != (ret = nandroid_restore_partition(backup_path, "/boot")))
-        return ret;
-#endif
-    
     struct stat s;
-    Volume *vol = volume_for_path("/wimax");
-    if (restore_wimax && vol != NULL && 0 == stat(vol->device, &s))
-    {
-        char serialno[PROPERTY_VALUE_MAX];
-        
-        serialno[0] = 0;
-        property_get("ro.serialno", serialno, "");
-        sprintf(tmp, "%s/wimax.%s.img", backup_path, serialno);
-
-        struct stat st;
-        if (0 != stat(tmp, &st))
-        {
-            ui_print("WARNING: WiMAX partition exists, but nandroid\n");
-            ui_print("         backup does not contain WiMAX image.\n");
-            ui_print("         You should create a new backup to\n");
-            ui_print("         protect your WiMAX keys.\n");
-        }
-        else
-        {
-            ui_print("Erasing WiMAX before restore...\n");
-            if (0 != (ret = format_volume("/wimax")))
-                return print_and_error("Error while formatting wimax!\n");
-            ui_print("Restoring WiMAX image...\n");
-            if (0 != (ret = restore_raw_partition(vol->fs_type, vol->device, tmp)))
-                return ret;
-        }
-    }
 
     if (restore_systemorig && 0 != (ret = nandroid_restore_partition(backup_path, "/systemorig")))
-        return ret;
+	return ret;
 
     if (restore_system && 0 != (ret = nandroid_restore_partition(backup_path, "/system")))
         return ret;
@@ -677,7 +646,8 @@ int nandroid_main(int argc, char** argv)
     {
         if (argc != 3)
             return nandroid_usage();
-        return nandroid_restore(argv[2], 1, 1, 1, 1, 1, 0, 1, (safemode) ? 0 : 1);
+        int safemode=get_safe_mode();
+	return nandroid_restore(argv[2], 1, 1, 1, (safemode) ? 0 : 1 );
     }
     
     return nandroid_usage();

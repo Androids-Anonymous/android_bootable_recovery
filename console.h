@@ -1,5 +1,7 @@
 /*
- * Copyright (C) 2008 The Android Open Source Project
+ * Copyright (C) 2010 Skrilax_CZ
+ * Open Recovery Console
+ *
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,18 +15,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+ 
+#ifndef CONSOLE_H_
+#define CONSOLE_H_
 
-#ifndef _RECOVERY_VERIFIER_H
-#define _RECOVERY_VERIFIER_H
+#define CONSOLE_FORCE_QUIT 		-55
+#define CONSOLE_FAILED_START 	-56
 
-#include "mincrypt/rsa.h"
+int run_console(const char* command);
+void show_console_menu();
 
-/* Look in the file for a signature footer, and verify that it
- * matches one of the given keys.  Return one of the constants below.
- */
-int verify_file(const char* path, const RSAPublicKey *pKeys, unsigned int numKeys);
-
-#define VERIFY_SUCCESS        0
-#define VERIFY_FAILURE        1
-
-#endif  /* _RECOVERY_VERIFIER_H */
+#endif //!CONSOLE_H_

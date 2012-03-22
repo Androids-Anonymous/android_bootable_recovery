@@ -50,7 +50,7 @@ struct input_event;
 
 int ev_init(void);
 void ev_exit(void);
-int ev_get(struct input_event *ev, unsigned dont_wait, unsigned keyheld, unsigned fast);
+int ev_get(struct input_event *ev, unsigned dont_wait, unsigned keyheld);
 
 // Resources
 

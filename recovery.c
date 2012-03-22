@@ -21,22 +21,25 @@
 #include <getopt.h>
 #include <limits.h>
 #include <linux/input.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/reboot.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <sys/stat.h>
+#include <signal.h>
 
 #include "bootloader.h"
+#include "firmware.h"
 #include "common.h"
 #include "cutils/properties.h"
 #include "install.h"
-#include "minui/minui.h"
+#include <minui/minui.h>
 #include "minzip/DirUtil.h"
 #include "roots.h"
 #include "recovery_ui.h"
@@ -46,6 +49,10 @@
 #include "flashutils/flashutils.h"
 
 #include "safebootcommands.h"
+
+#include "console.h"
+
+#define MENU_HEADER_COLS 55
 
 static const struct option OPTIONS[] = {
   { "send_intent", required_argument, NULL, 's' },
@@ -62,6 +69,7 @@ static const char *INTENT_FILE = "/cache/recovery/intent";
 static const char *LOG_FILE = "/cache/recovery/log";
 static const char *LAST_LOG_FILE = "/cache/recovery/last_log";
 static const char *SDCARD_ROOT = "/sdcard";
+static const char *EMMC_ROOT = "/emmc";
 static int allow_display_toggle = 1;
 static int poweroff = 0;
 static const char *SDCARD_PACKAGE_FILE = "/sdcard/update.zip";
@@ -162,7 +170,7 @@ fopen_path(const char *path, const char *mode) {
     if (strchr("wa", mode[0])) dirCreateHierarchy(path, 0777, NULL, 1);
 
     FILE *fp = fopen(path, mode);
-    if (fp == NULL && path != COMMAND_FILE) LOGE("Can't open %s\n", path);
+    if (fp == NULL && path != COMMAND_FILE) LOGE("can't open %s\n", path);
     return fp;
 }
 
@@ -170,7 +178,7 @@ fopen_path(const char *path, const char *mode) {
 static void
 check_and_fclose(FILE *fp, const char *name) {
     fflush(fp);
-    if (ferror(fp)) LOGE("Error in %s\n(%s)\n", name, strerror(errno));
+    if (ferror(fp)) LOGE("error in %s\n(%s)\n", name, strerror(errno));
     fclose(fp);
 }
 
@@ -187,11 +195,11 @@ get_args(int *argc, char ***argv) {
     }
 
     if (boot.command[0] != 0 && boot.command[0] != 255) {
-        LOGI("Boot command: %.*s\n", sizeof(boot.command), boot.command);
+        LOGI("boot command: %.*s\n", sizeof(boot.command), boot.command);
     }
 
     if (boot.status[0] != 0 && boot.status[0] != 255) {
-        LOGI("Boot status: %.*s\n", sizeof(boot.status), boot.status);
+        LOGI("boot status: %.*s\n", sizeof(boot.status), boot.status);
     }
 
     struct stat file_info;
@@ -207,9 +215,9 @@ get_args(int *argc, char ***argv) {
                 if ((arg = strtok(NULL, "\n")) == NULL) break;
                 (*argv)[*argc] = strdup(arg);
             }
-            LOGI("Got arguments from boot message\n");
+            LOGI("got arguments from boot message\n");
         } else if (boot.recovery[0] != 0 && boot.recovery[0] != 255) {
-            LOGE("Bad boot message\n\"%.20s\"\n", boot.recovery);
+            LOGE("bad boot message\n\"%.20s\"\n", boot.recovery);
         }
     }
 
@@ -228,7 +236,7 @@ get_args(int *argc, char ***argv) {
             }
 
             check_and_fclose(fp, COMMAND_FILE);
-            LOGI("Got arguments from %s\n", COMMAND_FILE);
+            LOGI("got arguments from %s\n", COMMAND_FILE);
         }
     }
 
@@ -262,11 +270,11 @@ static void
 copy_log_file(const char* destination, int append) {
     FILE *log = fopen_path(destination, append ? "a" : "w");
     if (log == NULL) {
-        LOGE("Can't open %s\n", destination);
+        LOGE("can't open %s\n", destination);
     } else {
         FILE *tmplog = fopen(TEMPORARY_LOG_FILE, "r");
         if (tmplog == NULL) {
-            LOGE("Can't open %s\n", TEMPORARY_LOG_FILE);
+            LOGE("can't open %s\n", TEMPORARY_LOG_FILE);
         } else {
             if (append) {
                 fseek(tmplog, tmplog_offset, SEEK_SET);  // Since last write
@@ -293,7 +301,7 @@ finish_recovery(const char *send_intent) {
     if (send_intent != NULL) {
         FILE *fp = fopen_path(INTENT_FILE, "w");
         if (fp == NULL) {
-            LOGE("Can't open %s\n", INTENT_FILE);
+            LOGE("can't open %s\n", INTENT_FILE);
         } else {
             fputs(send_intent, fp);
             check_and_fclose(fp, INTENT_FILE);
@@ -306,7 +314,7 @@ finish_recovery(const char *send_intent) {
     chmod(LAST_LOG_FILE, 0640);
 
     if (device_flash_type() == MTD) {
-        // Reset to mormal system boot so recovery won't cycle indefinitely.
+        // Reset to normal system boot so recovery won't cycle indefinitely.
         struct bootloader_message boot;
         memset(&boot, 0, sizeof(boot));
         set_bootloader_message(&boot);
@@ -315,7 +323,7 @@ finish_recovery(const char *send_intent) {
     // Remove the command file, so recovery won't repeat indefinitely.
     if (ensure_path_mounted(COMMAND_FILE) != 0 ||
         (unlink(COMMAND_FILE) && errno != ENOENT)) {
-        LOGW("Can't unlink %s\n", COMMAND_FILE);
+        LOGW("can't unlink %s\n", COMMAND_FILE);
     }
 
     sync();  // For good measure.
@@ -325,7 +333,7 @@ static int
 erase_volume(const char *volume) {
     ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_show_indeterminate_progress();
-    ui_print("Formatting %s...\n", volume);
+    ui_print("formatting %s...\n", volume);
 
     if (strcmp(volume, "/cache") == 0) {
         // Any part of the log we'd copied to cache is now gone.
@@ -340,18 +348,18 @@ erase_volume(const char *volume) {
 static char*
 copy_sideloaded_package(const char* original_path) {
   if (ensure_path_mounted(original_path) != 0) {
-    LOGE("Can't mount %s\n", original_path);
+    LOGE("can't mount %s\n", original_path);
     return NULL;
   }
 
   if (ensure_path_mounted(SIDELOAD_TEMP_DIR) != 0) {
-    LOGE("Can't mount %s\n", SIDELOAD_TEMP_DIR);
+    LOGE("can't mount %s\n", SIDELOAD_TEMP_DIR);
     return NULL;
   }
 
   if (mkdir(SIDELOAD_TEMP_DIR, 0700) != 0) {
     if (errno != EEXIST) {
-      LOGE("Can't mkdir %s (%s)\n", SIDELOAD_TEMP_DIR, strerror(errno));
+      LOGE("can't mkdir %s (%s)\n", SIDELOAD_TEMP_DIR, strerror(errno));
       return NULL;
     }
   }
@@ -382,25 +390,25 @@ copy_sideloaded_package(const char* original_path) {
 
   char* buffer = malloc(BUFSIZ);
   if (buffer == NULL) {
-    LOGE("Failed to allocate buffer\n");
+    LOGE("failed to allocate buffer\n");
     return NULL;
   }
 
   size_t read;
   FILE* fin = fopen(original_path, "rb");
   if (fin == NULL) {
-    LOGE("Failed to open %s (%s)\n", original_path, strerror(errno));
+    LOGE("failed to open %s (%s)\n", original_path, strerror(errno));
     return NULL;
   }
   FILE* fout = fopen(copy_path, "wb");
   if (fout == NULL) {
-    LOGE("Failed to open %s (%s)\n", copy_path, strerror(errno));
+    LOGE("failed to open %s (%s)\n", copy_path, strerror(errno));
     return NULL;
   }
 
   while ((read = fread(buffer, 1, BUFSIZ, fin)) > 0) {
     if (fwrite(buffer, 1, read, fout) != read) {
-      LOGE("Short write of %s (%s)\n", copy_path, strerror(errno));
+      LOGE("short write of %s (%s)\n", copy_path, strerror(errno));
       return NULL;
     }
   }
@@ -408,19 +416,19 @@ copy_sideloaded_package(const char* original_path) {
   free(buffer);
 
   if (fclose(fout) != 0) {
-    LOGE("Failed to close %s (%s)\n", copy_path, strerror(errno));
+    LOGE("failed to close %s (%s)\n", copy_path, strerror(errno));
     return NULL;
   }
 
   if (fclose(fin) != 0) {
-    LOGE("Failed to close %s (%s)\n", original_path, strerror(errno));
+    LOGE("failed to close %s (%s)\n", original_path, strerror(errno));
     return NULL;
   }
 
   // "adb push" is happy to overwrite read-only files when it's
   // running as root, but we'll try anyway.
   if (chmod(copy_path, 0400) != 0) {
-    LOGE("Failed to chmod %s (%s)\n", copy_path, strerror(errno));
+    LOGE("failed to chmod %s (%s)\n", copy_path, strerror(errno));
     return NULL;
   }
 
@@ -429,13 +437,19 @@ copy_sideloaded_package(const char* original_path) {
 
 static char**
 prepend_title(const char** headers) {
-    char tmp[PATH_MAX];
-    sprintf(tmp, "Safe System is: %s", safemode ? "ENABLED" : "DISABLED");
-    char* title[] = { EXPAND(RECOVERY_VERSION),
-                      ""
+    char tmp1[PATH_MAX];
+    char tmp2[PATH_MAX];
+    sprintf(tmp1, "|                         %s |", EXPAND(RECOVERY_VERSION));
+    sprintf(tmp2, "|                         safe system is: %s", safemode ? "  ENABLED |" : " DISABLED |");
+    char* title[] = { ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", 
+		      "",
                       "",
-                      NULL };
-    title[1] = strdup(tmp);
+		      "|,==================/\\______________________________|", 
+		       NULL
+                    };
+    
+    title[1] = strdup(tmp1);
+    title[2] = strdup(tmp2);
 
     // count the number of lines in our title, plus the
     // caller-provided headers.
@@ -443,7 +457,8 @@ prepend_title(const char** headers) {
     char** p;
     for (p = title; *p; ++p, ++count);
     for (p = headers; *p; ++p, ++count);
-
+    
+    
     char** new_headers = malloc((count+1) * sizeof(char*));
     char** h = new_headers;
     for (p = title; *p; ++p, ++h) *h = *p;
@@ -455,10 +470,18 @@ prepend_title(const char** headers) {
 
 int
 get_menu_selection(char** headers, char** items, int menu_only,
-                   int initial_selection) {
+                   int initial_selection, int main_menu, int adv_menu) {
     // throw away keys pressed previously, so user doesn't
     // accidentally trigger menu items.
     ui_clear_key_queue();
+    
+    if(main_menu){
+	items=MENU_ITEMS_SAFE;
+    }
+
+    if(adv_menu){
+	items=ADV_MENU_ITEMS_SAFE;
+    }
 
     int item_count = ui_start_menu(headers, items, initial_selection);
     int selected = initial_selection;
@@ -473,7 +496,7 @@ get_menu_selection(char** headers, char** items, int menu_only,
         int key = ui_wait_key();
         int visible = ui_text_visible();
 
-        int action = device_handle_key(key, visible);
+        int action = device_handle_key(key /*, visible*/);
 
         int old_selected = selected;
 
@@ -500,6 +523,36 @@ get_menu_selection(char** headers, char** items, int menu_only,
                 case GO_BACK:
                     chosen_item = GO_BACK;
                     break;
+		case SELECT_0:
+		    chosen_item = 9;
+		    break;
+		case SELECT_1:
+		    chosen_item = 0;
+		    break;
+		case SELECT_2:
+		    chosen_item = 1;
+		    break;
+		case SELECT_3:
+		    chosen_item = 2;
+		    break;
+		case SELECT_4:
+		    chosen_item = 3;
+		    break;
+		case SELECT_5:
+		    chosen_item = 4;
+		    break;
+		case SELECT_6:
+		    chosen_item = 5;
+		    break;
+		case SELECT_7:
+		    chosen_item = 6;
+		    break;
+		case SELECT_8:
+		    chosen_item = 7;
+		    break;
+		case SELECT_9:
+		    chosen_item = 8;
+		    break;
             }
         } else if (!menu_only) {
             chosen_item = action;
@@ -532,183 +585,47 @@ static int compare_string(const void* a, const void* b) {
     return strcmp(*(const char**)a, *(const char**)b);
 }
 
-static int
-sdcard_directory(const char* path) {
-    ensure_path_mounted(SDCARD_ROOT);
-
-    const char* MENU_HEADERS[] = { "Choose a package to install:",
-                                   path,
-                                   "",
-                                   NULL };
-    DIR* d;
-    struct dirent* de;
-    d = opendir(path);
-    if (d == NULL) {
-        LOGE("error opening %s: %s\n", path, strerror(errno));
-        ensure_path_unmounted(SDCARD_ROOT);
-        return 0;
-    }
-
-    char** headers = prepend_title(MENU_HEADERS);
-
-    int d_size = 0;
-    int d_alloc = 10;
-    char** dirs = malloc(d_alloc * sizeof(char*));
-    int z_size = 1;
-    int z_alloc = 10;
-    char** zips = malloc(z_alloc * sizeof(char*));
-    zips[0] = strdup("../");
-
-    while ((de = readdir(d)) != NULL) {
-        int name_len = strlen(de->d_name);
-
-        if (de->d_type == DT_DIR) {
-            // skip "." and ".." entries
-            if (name_len == 1 && de->d_name[0] == '.') continue;
-            if (name_len == 2 && de->d_name[0] == '.' &&
-                de->d_name[1] == '.') continue;
-
-            if (d_size >= d_alloc) {
-                d_alloc *= 2;
-                dirs = realloc(dirs, d_alloc * sizeof(char*));
-            }
-            dirs[d_size] = malloc(name_len + 2);
-            strcpy(dirs[d_size], de->d_name);
-            dirs[d_size][name_len] = '/';
-            dirs[d_size][name_len+1] = '\0';
-            ++d_size;
-        } else if (de->d_type == DT_REG &&
-                   name_len >= 4 &&
-                   strncasecmp(de->d_name + (name_len-4), ".zip", 4) == 0) {
-            if (z_size >= z_alloc) {
-                z_alloc *= 2;
-                zips = realloc(zips, z_alloc * sizeof(char*));
-            }
-            zips[z_size++] = strdup(de->d_name);
-        }
-    }
-    closedir(d);
-
-    qsort(dirs, d_size, sizeof(char*), compare_string);
-    qsort(zips, z_size, sizeof(char*), compare_string);
-
-    // append dirs to the zips list
-    if (d_size + z_size + 1 > z_alloc) {
-        z_alloc = d_size + z_size + 1;
-        zips = realloc(zips, z_alloc * sizeof(char*));
-    }
-    memcpy(zips + z_size, dirs, d_size * sizeof(char*));
-    free(dirs);
-    z_size += d_size;
-    zips[z_size] = NULL;
-
-    int result;
-    int chosen_item = 0;
-    do {
-        chosen_item = get_menu_selection(headers, zips, 1, chosen_item);
-
-        char* item = zips[chosen_item];
-        int item_len = strlen(item);
-        if (chosen_item == 0) {          // item 0 is always "../"
-            // go up but continue browsing (if the caller is sdcard_directory)
-            result = -1;
-            break;
-        } else if (item[item_len-1] == '/') {
-            // recurse down into a subdirectory
-            char new_path[PATH_MAX];
-            strlcpy(new_path, path, PATH_MAX);
-            strlcat(new_path, "/", PATH_MAX);
-            strlcat(new_path, item, PATH_MAX);
-            new_path[strlen(new_path)-1] = '\0';  // truncate the trailing '/'
-            result = sdcard_directory(new_path);
-            if (result >= 0) break;
-        } else {
-            // selected a zip file:  attempt to install it, and return
-            // the status to the caller.
-            char new_path[PATH_MAX];
-            strlcpy(new_path, path, PATH_MAX);
-            strlcat(new_path, "/", PATH_MAX);
-            strlcat(new_path, item, PATH_MAX);
-
-            ui_print("\n-- Install %s ...\n", path);
-            set_sdcard_update_bootloader_message();
-            char* copy = copy_sideloaded_package(new_path);
-            ensure_path_unmounted(SDCARD_ROOT);
-            if (copy) {
-                result = install_package(copy);
-                free(copy);
-            } else {
-                result = INSTALL_ERROR;
-            }
-            break;
-        }
-    } while (true);
-
-    int i;
-    for (i = 0; i < z_size; ++i) free(zips[i]);
-    free(zips);
-    free(headers);
-
-    ensure_path_unmounted(SDCARD_ROOT);
-    return result;
-}
-
 static void
 wipe_data(int confirm) {
-    if (confirm) {
-        static char** title_headers = NULL;
+	
+    const char* confirm_wipe[] = {    
+				      "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+			 	      "|           | c o n f i r m   w i p e ? |           |",
+				      "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+		      		      NULL
+				 };
 
-        if (title_headers == NULL) {
-            char* headers[] = { "Confirm wipe of all user data?",
-                                "  THIS CAN NOT BE UNDONE.",
-                                "",
-                                NULL };
-            title_headers = prepend_title((const char**)headers);
-        }
+    char confirm_datawipe[MENU_HEADER_COLS] = "| <8> yes - wipe everything                       |/|" ; 
 
-        char* items[] = { " No",
-                          " No",
-                          " No",
-                          " No",
-                          " No",
-                          " No",
-                          " No",
-                          " Yes -- delete all user data",   // [7]
-                          " No",
-                          " No",
-                          " No",
-                          NULL };
+    if (confirm_selection(confirm_wipe,confirm_datawipe)) {
 
-        int chosen_item = get_menu_selection(title_headers, items, 1, 0);
-        if (chosen_item != 7) {
-            return;
-        }
+	    ui_print("\n-- wiping data...\n");
+	    device_wipe_data();
+	    erase_volume("/data");
+	    erase_volume("/cache");
+	    
+	    if (has_datadata()) {
+		erase_volume("/datadata");
+	    }
+	    
+	    erase_volume("/sd-ext");
+	    erase_volume("/sdcard/.android_secure");
+	    ui_print("data wipe complete.\n");
     }
-
-    ui_print("\n-- Wiping data...\n");
-    device_wipe_data();
-    erase_volume("/data");
-    erase_volume("/cache");
-    if (has_datadata()) {
-        erase_volume("/datadata");
-    }
-    erase_volume("/sd-ext");
-    erase_volume("/sdcard/.android_secure");
-    ui_print("Data wipe complete.\n");
 }
 
 static void
 prompt_and_wait() {
     safemode = get_safe_mode();
     char** headers = NULL;
-
+    
     for (;;) {
         headers = prepend_title((const char**)MENU_HEADERS);
         finish_recovery(NULL);
         ui_reset_progress();
-
-        allow_display_toggle = 1;
-        int chosen_item = get_menu_selection(headers, MENU_ITEMS, 0, 0);
+        
+	allow_display_toggle = 1;
+	int chosen_item = get_menu_selection(headers, MENU_ITEMS, 0, 0, safemode, 0);
         allow_display_toggle = 0;
 
         // device-specific code may take some action here.  It may
@@ -718,68 +635,80 @@ prompt_and_wait() {
 
         switch (chosen_item) {
             case ITEM_REBOOT:
-                poweroff=0;
+	    {
+		poweroff=0;
                 return;
+	    } break;
 
             case ITEM_WIPE_DATA:
-                wipe_data(ui_text_visible());
+		wipe_data(ui_text_visible());
                 if (!ui_text_visible()) return;
                 break;
 
             case ITEM_WIPE_CACHE:
-                if (confirm_selection("Confirm wipe?", "Yes - Wipe Cache"))
+            {
+		const char* confirm_wipe[] = {   
+						  "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+						  "|          | c o n f i r m    w i p e  ? |          |",
+						  "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+		      				  NULL
+
+					     };
+		
+		char confirm_wc[MENU_HEADER_COLS] = "| <8> yes - wipe cache                            |/|"; 
+
+		if (confirm_selection(confirm_wipe,confirm_wc))
                 {
-                    ui_print("\n-- Wiping cache...\n");
+                    ui_print("\n-- wiping cache...\n");
                     erase_volume("/cache");
-                    ui_print("Cache wipe complete.\n");
+                    ui_print("cache wipe complete.\n");
                     if (!ui_text_visible()) return;
                 }
                 break;
-
-            case ITEM_APPLY_SDCARD:
-                if (get_safe_mode() == 0) {
-                    ui_print("Install update.zip is only available while Safe System is enabled.\n");
-                } else {
-                    if (confirm_selection("Confirm install?", "Yes - Install /sdcard/update.zip"))
-                    {
-                        ui_print("\n-- Install from sdcard...\n");
-                        int status = install_package(SDCARD_PACKAGE_FILE);
-                        safemode = get_safe_mode();
-                        if (status != INSTALL_SUCCESS) {
-                            ui_set_background(BACKGROUND_ICON_ERROR);
-                            ui_print("Installation aborted.\n");
-                        } else if (!ui_text_visible()) {
-                            return;  // reboot if logs aren't visible
-                        } else {
-                            ui_print("\nInstall from sdcard complete.\n");
-                        }
-                    }
-		}
-                break;
+	    }
             case ITEM_INSTALL_ZIP:
-                if (get_safe_mode() == 0) {
-                    ui_print(".zip install is only available while Safe System is enabled.\n");
-                } else {
-                    show_install_update_menu();
-                    safemode = get_safe_mode();
-                }
+                show_install_update_menu();
+                safemode = get_safe_mode();
                 break;
+
             case ITEM_NANDROID:
                 show_nandroid_menu();
+                safemode = get_safe_mode();
                 break;
+
             case ITEM_PARTITION:
                 show_partition_menu();
+                safemode = get_safe_mode();
                 break;
+
             case ITEM_ADVANCED:
-                show_advanced_menu();
+                safemode = get_safe_mode();
+		show_advanced_menu(safemode);
+                safemode = get_safe_mode();
                 break;
+
             case ITEM_SAFEBOOT:
                 show_safe_boot_menu();
                 safemode = get_safe_mode();
                 break;
-            case ITEM_POWEROFF:
-                poweroff=1;
-                return;
+
+            case ITEM_CONSOLE:
+		if(ensure_path_mounted(EMMC_ROOT) != 0) {
+		  LOGE("can't mount /emmc, trying /sdcard");
+		  if(ensure_path_mounted(SDCARD_ROOT) != 0) {
+		    LOGE("can't mount /sdcard either.");
+		  }
+		}  
+		show_console_menu();
+                safemode = get_safe_mode();
+            	break;
+
+                case ITEM_POWEROFF:
+	        {
+		    poweroff=1;
+                    return;
+	        }
+             break;
         }
     }
 }
@@ -833,13 +762,13 @@ main(int argc, char **argv) {
     // If these fail, there's not really anywhere to complain...
     freopen(TEMPORARY_LOG_FILE, "a", stdout); setbuf(stdout, NULL);
     freopen(TEMPORARY_LOG_FILE, "a", stderr); setbuf(stderr, NULL);
-    printf("Starting recovery on %s", ctime(&start));
+    printf("starting recovery on %s", ctime(&start));
 
     ui_init();
-    ui_print(EXPAND(RECOVERY_VERSION)"\n");
+    //ui_print(EXPAND(RECOVERY_VERSION)"\n");
     load_volume_table();
     process_volumes();
-    LOGI("Processing arguments.\n");
+    LOGI("processing arguments.\n");
     get_args(&argc, &argv);
 
     int previous_runs = 0;
@@ -850,7 +779,7 @@ main(int argc, char **argv) {
     int toggle_secure_fs = 0;
     encrypted_fs_info encrypted_fs_data;
 
-    LOGI("Checking arguments.\n");
+    LOGI("checking arguments.\n");
     int arg;
     while ((arg = getopt_long(argc, argv, "", OPTIONS, NULL)) != -1) {
         switch (arg) {
@@ -866,7 +795,7 @@ main(int argc, char **argv) {
         case 'e': encrypted_fs_mode = optarg; toggle_secure_fs = 1; break;
         case 't': ui_show_text(1); break;
         case '?':
-            LOGE("Invalid command argument\n");
+            LOGE("invalid command argument\n");
             continue;
         }
     }
@@ -874,7 +803,7 @@ main(int argc, char **argv) {
     LOGI("device_recovery_start()\n");
     device_recovery_start();
 
-    printf("Command:");
+    printf("command:");
     for (arg = 0; arg < argc; arg++) {
         printf(" \"%s\"", argv[arg]);
     }
@@ -904,12 +833,12 @@ main(int argc, char **argv) {
     if (toggle_secure_fs) {
         if (strcmp(encrypted_fs_mode,"on") == 0) {
             encrypted_fs_data.mode = MODE_ENCRYPTED_FS_ENABLED;
-            ui_print("Enabling Encrypted FS.\n");
+            ui_print("enabling encrypted FS.\n");
         } else if (strcmp(encrypted_fs_mode,"off") == 0) {
             encrypted_fs_data.mode = MODE_ENCRYPTED_FS_DISABLED;
-            ui_print("Disabling Encrypted FS.\n");
+            ui_print("disabling encrypted FS.\n");
         } else {
-            ui_print("Error: invalid Encrypted FS setting.\n");
+            ui_print("error: invalid encrypted FS setting.\n");
             status = INSTALL_ERROR;
         }
 
@@ -917,39 +846,39 @@ main(int argc, char **argv) {
         // This preventsthe device recycling endlessly in recovery mode.
         if ((encrypted_fs_data.mode == MODE_ENCRYPTED_FS_ENABLED) &&
                 (read_encrypted_fs_info(&encrypted_fs_data))) {
-            ui_print("Encrypted FS change aborted, resetting to disabled state.\n");
+            ui_print("encrypted FS change aborted, resetting to disabled state.\n");
             encrypted_fs_data.mode = MODE_ENCRYPTED_FS_DISABLED;
         }
 
         if (status != INSTALL_ERROR) {
             if (erase_volume("/data")) {
-                ui_print("Data wipe failed.\n");
+                ui_print("data wipe failed.\n");
                 status = INSTALL_ERROR;
             } else if (erase_volume("/cache")) {
-                ui_print("Cache wipe failed.\n");
+                ui_print("cache wipe failed.\n");
                 status = INSTALL_ERROR;
             } else if ((encrypted_fs_data.mode == MODE_ENCRYPTED_FS_ENABLED) &&
                       (restore_encrypted_fs_info(&encrypted_fs_data))) {
-                ui_print("Encrypted FS change aborted.\n");
+                ui_print("encrypted FS change aborted.\n");
                 status = INSTALL_ERROR;
             } else {
-                ui_print("Successfully updated Encrypted FS.\n");
+                ui_print("successfully updated encrypted FS.\n");
                 status = INSTALL_SUCCESS;
             }
         }
     } else if (update_package != NULL) {
         status = install_package(update_package);
-        if (status != INSTALL_SUCCESS) ui_print("Installation aborted.\n");
+        if (status != INSTALL_SUCCESS) ui_print("installation aborted.\n");
     } else if (wipe_data) {
         if (device_wipe_data()) status = INSTALL_ERROR;
         if (erase_volume("/data")) status = INSTALL_ERROR;
         if (wipe_cache && erase_volume("/cache")) status = INSTALL_ERROR;
-        if (status != INSTALL_SUCCESS) ui_print("Data wipe failed.\n");
+        if (status != INSTALL_SUCCESS) ui_print("data wipe failed.\n");
     } else if (wipe_cache) {
         if (wipe_cache && erase_volume("/cache")) status = INSTALL_ERROR;
-        if (status != INSTALL_SUCCESS) ui_print("Cache wipe failed.\n");
+        if (status != INSTALL_SUCCESS) ui_print("cache wipe failed.\n");
     } else {
-        LOGI("Checking for extendedcommand...\n");
+        LOGI("checking for extendedcommand...\n");
         status = INSTALL_ERROR;  // No command specified
         // we are starting up in user initiated recovery here
         // let's set up some default options
@@ -960,7 +889,7 @@ main(int argc, char **argv) {
         ui_set_background(BACKGROUND_ICON_CLOCKWORK);
         
         if (extendedcommand_file_exists()) {
-            LOGI("Running extendedcommand...\n");
+            LOGI("running extendedcommand...\n");
             int ret;
             if (0 == (ret = run_and_remove_extendedcommand())) {
                 status = INSTALL_SUCCESS;
@@ -970,7 +899,7 @@ main(int argc, char **argv) {
                 handle_failure(ret);
             }
         } else {
-            LOGI("Skipping execution of extendedcommand, file not found...\n");
+            LOGI("skipping execution of extendedcommand, file not found...\n");
         }
     }
 
@@ -985,9 +914,9 @@ main(int argc, char **argv) {
     // Otherwise, get ready to boot the main system...
     finish_recovery(send_intent);
     if(!poweroff)
-        ui_print("Rebooting...\n");
+        ui_print("rebooting...\n");
     else
-        ui_print("Shutting down...\n");
+        ui_print("shutting down...\n");
     sync();
     reboot((!poweroff) ? RB_AUTOBOOT : RB_POWER_OFF);
     return EXIT_SUCCESS;

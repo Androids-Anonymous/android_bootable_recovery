@@ -48,7 +48,7 @@ extern int device_reboot_now(volatile char* key_pressed, int key_code);
 //   - invoke the highlighted item (SELECT_ITEM)
 //   - do nothing (NO_ACTION)
 //   - invoke a specific action (a menu position: any non-negative number)
-extern int device_handle_key(int key, int visible);
+extern int device_handle_key(int key /*, int visible*/ );
 
 // Perform a recovery action selected from the menu.  'which' will be
 // the item number of the selected menu item, or a non-negative number
@@ -71,26 +71,42 @@ int device_wipe_data();
 #define HIGHLIGHT_DOWN      -3
 #define SELECT_ITEM         -4
 #define GO_BACK             -5
+#define SELECT_0	    1100
+#define SELECT_1	    1101
+#define SELECT_2	    1102
+#define SELECT_3	    1103
+#define SELECT_4	    1104
+#define SELECT_5	    1105
+#define SELECT_6	    1106
+#define SELECT_7	    1107
+#define SELECT_8	    1108
+#define SELECT_9	    1109
+#define SELECT_10	    1110
+#define SELECT_11	    1111
+#define SELECT_OFFSET	    1100
 
-#define ITEM_REBOOT          0
-#define ITEM_APPLY_SDCARD    1
-#define ITEM_WIPE_DATA       2
-#define ITEM_WIPE_CACHE      3
-#define ITEM_INSTALL_ZIP     4
+#define ITEM_SAFEBOOT        0
+#define ITEM_REBOOT          1
+#define ITEM_POWEROFF	     2
+#define ITEM_WIPE_DATA       3
+#define ITEM_WIPE_CACHE      4
 #define ITEM_NANDROID        5
 #define ITEM_PARTITION       6
 #define ITEM_ADVANCED        7
-#define ITEM_SAFEBOOT        8
-#define ITEM_POWEROFF        9
+#define ITEM_CONSOLE         8
+#define ITEM_INSTALL_ZIP     9
 
 // Header text to display above the main menu.
 extern char* MENU_HEADERS[];
 
-// Text of menu items.
+// Text of menu items for both non-safe and safe modes.
 extern char* MENU_ITEMS[];
+extern char* MENU_ITEMS_SAFE[];
+extern char* ADV_MENU_ITEMS[];
+extern char* ADV_MENU_ITEMS_SAFE[];
 
 int
-get_menu_selection(char** headers, char** items, int menu_only, int initial_selection);
+get_menu_selection(char** headers, char** items, int menu_only, int initial_selection, int main_menu, int adv_menu);
 
 void
 set_sdcard_update_bootloader_message();

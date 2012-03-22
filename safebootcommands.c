@@ -34,28 +34,30 @@
 
 #include "safebootcommands.h"
 
+#define MENU_HEADER_COLS 55
+
 int safemode = 0;
 
 int check_systemorig_mount() {
     int result = 0;
     result = scan_mounted_volumes();
     if (result < 0) {
-        LOGE("failed to scan mounted volumes\n");
-        return 0;
+	LOGE("failed to scan mounted volumes\n");
+	return 0;
     }
     const MountedVolume* mv = find_mounted_volume_by_mount_point("/systemorig");
     if (mv == NULL) {
-        __system("mount /dev/block/systemorig /systemorig");
-        result = scan_mounted_volumes();
-        if (result < 0) {
-            LOGE("failed to scan mounted volumes\n");
-            return 0;
-        }
-        const MountedVolume* mv = find_mounted_volume_by_mount_point("/systemorig");
-        if (mv == NULL) {
-            LOGE ("Can't mount primary system!\n");
-            return 0;
-        }
+	__system("mount /dev/block/systemorig /systemorig");
+	result = scan_mounted_volumes();
+	if (result < 0) {
+	    LOGE("failed to scan mounted volumes\n");
+	    return 0;
+	}
+	const MountedVolume* mv = find_mounted_volume_by_mount_point("/systemorig");
+	if (mv == NULL) {
+	    LOGE ("can't mount primary system.\n");
+	    return 0;
+	}
     }
     return 1;
 }
@@ -65,50 +67,94 @@ int get_safe_mode() {
     if (check_systemorig_mount()) {
        struct statfs info;
        if (0 == statfs(SAFE_SYSTEM_FILE, &info))
-           result = 1;
+	   result = 1;
     }
     return result;
 }
 
+static char**
+prepend_title(const char** headers) {
+    char tmp1[PATH_MAX];
+    char tmp2[PATH_MAX];
+    sprintf(tmp1, "|                         %s |", EXPAND(RECOVERY_VERSION));
+    sprintf(tmp2, "|                         safe system is: %s", safemode ? "  ENABLED |" : " DISABLED |");
+    char* title[] = { ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", 
+		      "",
+                      "",
+		      "|,==================/\\______________________________|", 
+		       NULL
+                    };
+    
+    title[1] = strdup(tmp1);
+    title[2] = strdup(tmp2);
+
+    // count the number of lines in our title, plus the
+    // caller-provided headers.
+    int count = 0;
+    char** p;
+    for (p = title; *p; ++p, ++count);
+    for (p = headers; *p; ++p, ++count);
+    
+    
+    char** new_headers = malloc((count+1) * sizeof(char*));
+    char** h = new_headers;
+    for (p = title; *p; ++p, ++h) *h = *p;
+    for (p = headers; *p; ++p, ++h) *h = *p;
+    *h = NULL;
+
+    return new_headers;
+}
+
 void show_safe_boot_menu() {
     char tmp[PATH_MAX];
-    char* headers[] = {  "Safe System Menu",
-                                "",
-                                "",
-                                NULL
+    char** headers = NULL;
+    char* headers_before[] = {  "||  safe-boot menu  |/____________________________,/|",
+			        "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+				 NULL
     };
-    static char* list[] = { "Toggle Safe System",
-                            "Quick Toggle Safe System (Dangerous)",
-                            NULL
+    headers = prepend_title((const char**)headers_before);
+    static char* list[] = { "| <1> toggle safe system                          |/|",
+			    "| <2> quick toggle safe system (DANGEROUS)        |/|",
+			    NULL
     };
 
-    for (;;)
+    int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
+    
+    if (chosen_item == GO_BACK)
+        return;
+    
+    switch (chosen_item)
     {
-        sprintf(tmp, "Currently: %s", safemode ? "ENABLED" : "DISABLED");
-        headers[1] = strdup(tmp);
-        int chosen_item = get_menu_selection(headers, list, 0, 0);
-        if (chosen_item == GO_BACK)
-            break;
-        switch (chosen_item)
+        case 0:
         {
-            case 0:
-            {
-                static char* confirm_install  = "Confirm Toggle?";
-                static char confirm[PATH_MAX];
-                sprintf(confirm, "Yes - %s Safe System", !safemode ? "Enable" : "Disable");
-                if (confirm_selection(confirm_install, confirm)) toggle_safe_mode();
-                break;
-            }
-            case 1:
-            {
-                static char* confirm_install  = "Confirm Quick Toggle? (WARNING: DANGEROUS!)";
-                static char confirm[PATH_MAX];
-                sprintf(confirm, "Yes - %s Safe System (DANGEROUS! NO BACKUP/RESTORE)", !safemode ? "Enable" : "Disable");
-                if (confirm_selection(confirm_install, confirm)) quick_toggle_safe_mode();
-                break;
-            }
+	    const char* confirm_toggle[] = {   
+	    				        "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+					        "|         | c o n f i r m   t o g g l e   ? |       |",
+					        "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+					        NULL
+				           };
+
+	    char confirm_tog[MENU_HEADER_COLS];
+	    sprintf(confirm_tog,  "[ <8> yes - %s safe system                   |/|", !safemode ? " enable" : "disable");
+ 	    if (confirm_selection(confirm_toggle, confirm_tog)) toggle_safe_mode();
+	    break;
+        }
+        case 1:
+        {
+	    const char* confirm_qtoggle[] = {   
+	              				"|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+					        "|   | c o n f i r m   q u i c k  t o g g l e  ? |   |",
+					        "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
+					        NULL
+					    };
+
+	    char confirm_qtog[MENU_HEADER_COLS];
+	    sprintf(confirm_qtog, "| <8> yes - %s safe system (DANGEROUS)       |/|", !safemode ? " enable" : "disable");
+	    if (confirm_selection(confirm_qtoggle, confirm_qtog)) quick_toggle_safe_mode();
+	    break;
         }
     }
+
 }
 
 void quick_toggle_safe_mode() {
@@ -126,7 +172,7 @@ void quick_toggle_safe_mode() {
         __system(cmd);
     }
     safemode = get_safe_mode();
-    ui_print("Safe System is now: %s!\n", safemode ? "ENABLED" : "DISABLED");
+    ui_print("safe system is now: %s!\n", safemode ? "ENABLED" : "DISABLED");
 }
 
 void toggle_safe_mode() {
@@ -140,22 +186,22 @@ void toggle_safe_mode() {
     sprintf(safe_backup_path, "/emmc/%s/safe", EXPAND(RECOVERY_FOLDER));
 
     if (ensure_path_mounted("/emmc") != 0) {
-        ui_print("Can't mount /emmc\n");
+        ui_print("can't mount /emmc\n");
         return;
     }
    
     int ret;
     if (0 != (ret = statfs("/emmc", &info))) {
-        ui_print("Unable to stat /emmc\n");
+        ui_print("unable to stat /emmc\n");
         return;
     }
     uint64_t bavail = info.f_bavail;
     uint64_t bsize = info.f_bsize;
     uint64_t sdcard_free = bavail * bsize;
     uint64_t sdcard_free_mb = sdcard_free / (uint64_t)(1024 * 1024);
-    ui_print("Emmc space free: %lluMB\n", sdcard_free_mb);
-    if (sdcard_free_mb < 2048)
-        ui_print("There may not be enough free space to complete backup... continuing...\n");
+    ui_print("emmc space free: %lluMB\n", sdcard_free_mb);
+    if (sdcard_free_mb < 1024)
+        ui_print("there may not be enough free space to complete backup... continuing...\n");
 
     ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_show_indeterminate_progress();
@@ -165,39 +211,39 @@ void toggle_safe_mode() {
         __system(cmd);
 
         /* 1. make a backup of the existing /data + /cache in /emmc/safestrap/orig/ */
-        ui_print("\n-- Backing up Original Data...\n");
+        ui_print("\n-- backing up original data...\n");
 
         sprintf(cmd, "rm %s/*", orig_backup_path);
         __system(cmd);
-        // if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/system"))) return;
-        // ui_set_progress(0.15);
+        if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/system"))) return;
+        ui_set_progress(0.15);
         if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/data"))) return;
-        // ui_set_progress(0.40);
-        // if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/cache"))) return;
-        // ui_set_progress(0.45);
+        ui_set_progress(0.40);
+        if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/cache"))) return;
+        ui_set_progress(0.45);
 
-        ui_print("\n-- Restoring Safe System Data...\n");
+        ui_print("\n-- restoring safe system data...\n");
 
-        // if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/system"))) return;
-        // ui_set_progress(0.60);
+        if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/system"))) return;
+        ui_set_progress(0.60);
         if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/data"))) return;
-        // ui_set_progress(0.80);
-        // if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/cache"))) return;
-        // ui_set_progress(0.90);
+        ui_set_progress(0.80);
+        if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/cache"))) return;
+        ui_set_progress(0.90);
 
         /* 3. wipe Dalvik Cache */
         __system("rm -r /data/dalvik-cache");
         __system("rm -r /cache/dalvik-cache");
         __system("rm -r /sd-ext/dalvik-cache");
-        // ui_set_progress(0.95);
+        ui_set_progress(0.95);
 
         /* 4. touch SAFE_SYSTEM_FILE */
         sprintf(cmd, "touch %s", SAFE_SYSTEM_FILE);
         ui_print("\n%s\n", cmd);
         __system(cmd);
 
-        // ui_set_progress(1);
-        ui_print("Swap to Safe System Complete.\n");
+        ui_set_progress(1);
+        ui_print("swap to safe system complete.\n");
 
     } else {
 
@@ -205,57 +251,45 @@ void toggle_safe_mode() {
         __system(cmd);
 
         /* 1. make a backup of the existing /data + /cache in /emmc/safestrap/safe/ */
-        ui_print("\n-- Backing up Safe System...\n");
+        ui_print("\n-- backing up safe system...\n");
 
         sprintf(cmd, "rm %s/*", safe_backup_path);
         __system(cmd);
-        // if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/system"))) return;
-        // ui_set_progress(0.15);
+        if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/system"))) return;
+        ui_set_progress(0.15);
         if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/data"))) return;
-        // ui_set_progress(0.40);
-        // if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/cache"))) return;
-        // ui_set_progress(0.45);
+        ui_set_progress(0.40);
+        if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/cache"))) return;
+        ui_set_progress(0.45);
 
-        ui_print("\n-- Restoring Original System...\n");
+        ui_print("\n-- restoring original system...\n");
 
-        // if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/system"))) return;
-        // ui_set_progress(0.60);
+        if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/system"))) return;
+        ui_set_progress(0.60);
         if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/data"))) return;
-        // ui_set_progress(0.80);
-        // if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/cache"))) return;
-        // ui_set_progress(0.90);
+        ui_set_progress(0.80);
+        if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/cache"))) return;
+        ui_set_progress(0.90);
 
         /* 3. wipe Dalvik Cache */
         __system("rm -r /data/dalvik-cache");
         __system("rm -r /cache/dalvik-cache");
         __system("rm -r /sd-ext/dalvik-cache");
-        // ui_set_progress(0.95);
+        ui_set_progress(0.95);
 
         /* 4. rm SAFE_SYSTEM_FILE */
         sprintf(cmd, "rm %s", SAFE_SYSTEM_FILE);
         ui_print("\n%s\n", cmd);
         __system(cmd);
 
-        // ui_set_progress(1);
-        ui_print("Swap to Original System Complete.\n");
+        ui_set_progress(1);
+        ui_print("swap to original system complete.\n");
     }
     sync();
-    ui_set_background(BACKGROUND_ICON_NONE);
+    ui_set_background(BACKGROUND_ICON_CLOCKWORK);
     ui_reset_progress();
 
     safemode = get_safe_mode();
-    ui_print("Safe System is now: %s!\n", safemode ? "ENABLED" : "DISABLED");
+    ui_print("safe system is now: %s \n", safemode ? "ENABLED" : "DISABLED");
 }
 
-
-void disable_safestrap() {
-    safemode = get_safe_mode();
-    if (__system("[ -f /systemorig/bin/logwrapper.bin ]") == 0) {
-        __system("rm /systemorig/bin/logwrapper");
-        __system("mv /systemorig/bin/logwrapper.bin /systemorig/bin/logwrapper");
-        ui_print("Safestrap disabled.  Use Safestrap.APK to reinstall.\n");
-    }
-    else {
-        ui_print("'logwrapper.bin' not found.  Won't delete original.\n");
-    }
-}
