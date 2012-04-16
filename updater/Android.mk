@@ -5,8 +5,8 @@ LOCAL_PATH := $(call my-dir)
 updater_src_files := \
 	install.c \
 	../mounts.c \
-	updater.c
-
+	updater.c \
+	../roots.c \
 #
 # Build a statically-linked binary to include in OTA packages
 #

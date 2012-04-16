@@ -17,6 +17,10 @@
 #ifndef _UPDATER_INSTALL_H_
 #define _UPDATER_INSTALL_H_
 
-void RegisterInstallFunctions();
+void
+RegisterInstallFunctions();
+
+int
+allow_flash_non_safe();
 
 #endif

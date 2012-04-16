@@ -71,10 +71,10 @@ static const char *LAST_LOG_FILE = "/cache/recovery/last_log";
 static const char *SDCARD_ROOT = "/sdcard";
 static const char *EMMC_ROOT = "/emmc";
 static int allow_display_toggle = 1;
-static int poweroff = 0;
 static const char *SDCARD_PACKAGE_FILE = "/sdcard/update.zip";
 static const char *TEMPORARY_LOG_FILE = "/tmp/recovery.log";
 static const char *SIDELOAD_TEMP_DIR = "/tmp/sideload";
+static int poweroff;
 
 /*
  * The recovery tool communicates with the main system through /cache files.
@@ -161,7 +161,7 @@ static const int MAX_ARGS = 100;
 FILE*
 fopen_path(const char *path, const char *mode) {
     if (ensure_path_mounted(path) != 0) {
-        LOGE("Can't mount %s\n", path);
+        LOGE("can't mount %s\n", path);
         return NULL;
     }
 
@@ -329,9 +329,9 @@ finish_recovery(const char *send_intent) {
     sync();  // For good measure.
 }
 
-static int
+int
 erase_volume(const char *volume) {
-    ui_set_background(BACKGROUND_ICON_INSTALLING);
+    //ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_show_indeterminate_progress();
     ui_print("formatting %s...\n", volume);
 
@@ -496,7 +496,7 @@ get_menu_selection(char** headers, char** items, int menu_only,
         int key = ui_wait_key();
         int visible = ui_text_visible();
 
-        int action = device_handle_key(key /*, visible*/);
+        int action = device_handle_key(key);
 
         int old_selected = selected;
 
@@ -558,22 +558,6 @@ get_menu_selection(char** headers, char** items, int menu_only,
             chosen_item = action;
         }
 
-/* removing for now :: too confusing for users.
-        if (abs(selected - old_selected) > 1) {
-            wrap_count++;
-            if (wrap_count == 3) {
-                wrap_count = 0;
-                if (ui_get_showing_back_button()) {
-                    ui_print("Back menu button disabled.\n");
-                    ui_set_showing_back_button(0);
-                }
-                else {
-                    ui_print("Back menu button enabled.\n");
-                    ui_set_showing_back_button(1);
-                }
-            }
-        }
-*/
     }
 
     ui_end_menu();
@@ -586,44 +570,15 @@ static int compare_string(const void* a, const void* b) {
 }
 
 static void
-wipe_data(int confirm) {
-	
-    const char* confirm_wipe[] = {    
-				      "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
-			 	      "|           | c o n f i r m   w i p e ? |           |",
-				      "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
-		      		      NULL
-				 };
-
-    char confirm_datawipe[MENU_HEADER_COLS] = "| <8> yes - wipe everything                       |/|" ; 
-
-    if (confirm_selection(confirm_wipe,confirm_datawipe)) {
-
-	    ui_print("\n-- wiping data...\n");
-	    device_wipe_data();
-	    erase_volume("/data");
-	    erase_volume("/cache");
-	    
-	    if (has_datadata()) {
-		erase_volume("/datadata");
-	    }
-	    
-	    erase_volume("/sd-ext");
-	    erase_volume("/sdcard/.android_secure");
-	    ui_print("data wipe complete.\n");
-    }
-}
-
-static void
 prompt_and_wait() {
     safemode = get_safe_mode();
     char** headers = NULL;
     
     for (;;) {
         headers = prepend_title((const char**)MENU_HEADERS);
-        finish_recovery(NULL);
         ui_reset_progress();
-        
+	finish_recovery(NULL);
+    
 	allow_display_toggle = 1;
 	int chosen_item = get_menu_selection(headers, MENU_ITEMS, 0, 0, safemode, 0);
         allow_display_toggle = 0;
@@ -634,81 +589,50 @@ prompt_and_wait() {
         chosen_item = device_perform_action(chosen_item);
 
         switch (chosen_item) {
-            case ITEM_REBOOT:
-	    {
-		poweroff=0;
-                return;
-	    } break;
-
-            case ITEM_WIPE_DATA:
-		wipe_data(ui_text_visible());
-                if (!ui_text_visible()) return;
-                break;
-
-            case ITEM_WIPE_CACHE:
-            {
-		const char* confirm_wipe[] = {   
-						  "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
-						  "|          | c o n f i r m    w i p e  ? |          |",
-						  "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
-		      				  NULL
-
-					     };
-		
-		char confirm_wc[MENU_HEADER_COLS] = "| <8> yes - wipe cache                            |/|"; 
-
-		if (confirm_selection(confirm_wipe,confirm_wc))
-                {
-                    ui_print("\n-- wiping cache...\n");
-                    erase_volume("/cache");
-                    ui_print("cache wipe complete.\n");
-                    if (!ui_text_visible()) return;
-                }
-                break;
-	    }
-            case ITEM_INSTALL_ZIP:
-                show_install_update_menu();
+            
+	    case ITEM_SAFEBOOT:
+                show_safe_boot_menu();
                 safemode = get_safe_mode();
+                break;
+	    
+	    case ITEM_REBOOT_MENU:
+	    {
+                poweroff = show_reboot_menu();
+		if (poweroff == REBOOT_NOW || poweroff == SHUTDOWN_NOW)
+		    return;
+		else
+		    break;
+	    } 
+
+            case ITEM_WIPE_MENU:
+                show_wipe_menu();
                 break;
 
             case ITEM_NANDROID:
                 show_nandroid_menu();
                 safemode = get_safe_mode();
                 break;
-
-            case ITEM_PARTITION:
+	    
+	    case ITEM_PARTITION:
                 show_partition_menu();
                 safemode = get_safe_mode();
                 break;
-
-            case ITEM_ADVANCED:
+	    
+	    case ITEM_ADVANCED:
                 safemode = get_safe_mode();
 		show_advanced_menu(safemode);
                 safemode = get_safe_mode();
                 break;
 
-            case ITEM_SAFEBOOT:
-                show_safe_boot_menu();
-                safemode = get_safe_mode();
-                break;
-
             case ITEM_CONSOLE:
-		if(ensure_path_mounted(EMMC_ROOT) != 0) {
-		  LOGE("can't mount /emmc, trying /sdcard");
-		  if(ensure_path_mounted(SDCARD_ROOT) != 0) {
-		    LOGE("can't mount /sdcard either.");
-		  }
-		}  
 		show_console_menu();
                 safemode = get_safe_mode();
             	break;
 
-                case ITEM_POWEROFF:
-	        {
-		    poweroff=1;
-                    return;
-	        }
-             break;
+	    case ITEM_INSTALL_ZIP:
+                show_install_update_menu();
+                safemode = get_safe_mode();
+                break;
         }
     }
 }
@@ -913,12 +837,14 @@ main(int argc, char **argv) {
 
     // Otherwise, get ready to boot the main system...
     finish_recovery(send_intent);
-    if(!poweroff)
+    if(poweroff == REBOOT_NOW)
         ui_print("rebooting...\n");
-    else
-        ui_print("shutting down...\n");
+    else if (poweroff == SHUTDOWN_NOW)
+    {
+    	ui_print("shutting down...\n");
+    }
     sync();
-    reboot((!poweroff) ? RB_AUTOBOOT : RB_POWER_OFF);
+    reboot((poweroff==REBOOT_NOW) ? RB_AUTOBOOT : RB_POWER_OFF);
     return EXIT_SUCCESS;
 }
 

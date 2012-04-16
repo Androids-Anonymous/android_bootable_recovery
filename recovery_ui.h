@@ -86,15 +86,33 @@ int device_wipe_data();
 #define SELECT_OFFSET	    1100
 
 #define ITEM_SAFEBOOT        0
-#define ITEM_REBOOT          1
-#define ITEM_POWEROFF	     2
-#define ITEM_WIPE_DATA       3
-#define ITEM_WIPE_CACHE      4
-#define ITEM_NANDROID        5
-#define ITEM_PARTITION       6
-#define ITEM_ADVANCED        7
-#define ITEM_CONSOLE         8
-#define ITEM_INSTALL_ZIP     9
+#define ITEM_REBOOT_MENU     1
+#define ITEM_WIPE_MENU       2
+#define ITEM_NANDROID        3
+#define ITEM_PARTITION       4
+#define ITEM_ADVANCED        5
+#define ITEM_CONSOLE         6
+#define ITEM_INSTALL_ZIP     7
+
+// Reboot menu selection order
+#define REBOOT_NOW	     1
+#define SHUTDOWN_NOW         2
+
+// Wipe menu selection order
+#define WIPE_CACHE	     0
+#define WIPE_DALVIK	     1
+#define WIPE_DATA  	     2
+#define WIPE_ALL             3
+
+// Advanced menuu selection orer
+#define PRINT_LOG	     0
+#define DUMP_LOG	     1
+#define KEY_TEST	     2
+#define WIPE_BAT	     3
+#define FIX_PERM	     4
+#define PART_EXT	     5
+#define PART_INT	     6
+#define UPDATE_NS	     7
 
 // Header text to display above the main menu.
 extern char* MENU_HEADERS[];

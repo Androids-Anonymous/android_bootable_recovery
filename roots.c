@@ -26,7 +26,10 @@
 #include "mounts.h"
 #include "roots.h"
 #include "common.h"
-#include "make_ext4fs.h"
+
+#ifdef USE_EXT4
+#include "../../extras/ext4_utils/make_ext4fs.h"
+#endif
 
 #include "flashutils/flashutils.h"
 #include "extendedcommands.h"

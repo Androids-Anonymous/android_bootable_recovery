@@ -1,6 +1,21 @@
 extern int signature_check_enabled;
 extern int script_assert_enabled;
 
+int
+backup_ss_files(const char *backup_script_path);
+
+int
+restore_ss_files(const char *restore_script_path);
+
+int
+open_pipe(const char *pathtoprog);
+
+int
+allow_flash_non_safe();
+
+int
+set_flash_non_safe(int set);
+
 void
 toggle_signature_check();
 
@@ -27,6 +42,12 @@ show_nandroid_menu();
 
 void
 show_partition_menu();
+
+int
+show_reboot_menu();
+
+void
+show_wipe_menu();
 
 void
 show_choose_zip_menu();

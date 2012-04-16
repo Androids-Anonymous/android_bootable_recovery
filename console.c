@@ -75,6 +75,9 @@
 #define ALT_BACKLIGHT_FILE      "/sys/class/leds/alt-key-light/brightness"
 #define SHIFT_BACKLIGHT_FILE    "/sys/class/leds/shift-key-light/brightness"
 
+#define BASH_RC_FILE		"/cache/.safestrap/home/.bashrc"
+#define SS_HOME_DIR 		"/cache/.safestrap/home"
+
 typedef struct
 {
 	char normal[KEY_MAX+1];
@@ -314,6 +317,10 @@ init_keypad_layout()
 	qwerty_layout.shifted[KEY_GRAVE] = '~';
 	qwerty_layout.alternate[KEY_GRAVE] = '~';
 
+	qwerty_layout.normal[KEY_BACK] = CHAR_ESCAPE;
+	qwerty_layout.shifted[KEY_BACK] = CHAR_ESCAPE;
+	qwerty_layout.alternate[KEY_BACK] = CHAR_ESCAPE;		
+
 	qwerty_layout.normal[KEY_RECORD] = CHAR_ESCAPE;
 	qwerty_layout.shifted[KEY_RECORD] = CHAR_ESCAPE;
 	qwerty_layout.alternate[KEY_RECORD] = CHAR_ESCAPE;		
@@ -425,19 +432,19 @@ void show_console_menu() {
     char tmp[PATH_MAX];               
     char** headers = NULL;
     char* headers_con[] = {  "||    console menu    |/__________________________,/|",
-			     "|+-+-+-+-+-+-+-+-+-+-+[[+-+-+-+-+-+-+-+-+-+-+-+-+-|/|",
-			     "|---------------------||--------------------------|/|",
-			     "|  OK+DEL  +==> EXIT  ||   ALT/SHFT+UP/DN         |/|",
-			     "|  OK      +==> CTRL  ||   \\=> SCROLL/SCROLL x8   |/|",      
-                             "|  MIC     +===> ESC  ||--------------------------|/|",
-			     "|  SEARCH  +==> HOME  ||   OK+SHIFT/ALT           |/|",
-			     "|  POWER   +===> END  ||   \\=> CAPSLOCK/ALTLOCK   |/|",
-			     "|-------------------------------------------------|/|", 
+			     "||-+-+-+-+-+-+-+-+-+-+[[+-+-+-+-+-+-+-+-+-+-+-+-+-|/|",
+			     "||--------------------||--------------------------|/|",
+			     "|| OK+DEL   +==> EXIT ||   ALT/SHFT+UP/DN         |/|",
+			     "|| OK       +==> CTRL ||   +=> SCROLL/SCROLL x8   |/|",      
+                             "|| MIC      +===> ESC ||--------------------------|/|",
+			     "|| SEARCH   +==> HOME ||   OK+SHIFT/ALT           |/|",
+			     "|| POWER    +===> END ||   +=> CAPSLOCK/ALTLOCK   |/|",
+			     "||------------------------------------------------|/|", 
 			      NULL
     };
     headers = prepend_title((const char**)headers_con);
 
-    static char* list[] = {  "| <1> open console                                |/|",
+    static char* list[] = {  "|| <1> open console                               |/|",
                               NULL
     };
     
@@ -538,10 +545,8 @@ create_subprocess(const char* cmd, const char* arg0, const char* arg1, pid_t* pP
     close(ptm);
 
     // environment variables
-    setenv("ANDROID_ROOT", "/", 1);
-    setenv("HOME", "/emmc/safestrap/home", 1);
+    setenv("HOME", SS_HOME_DIR, 1);
     setenv("PATH", "/sbin:/bin:/:/system/xbin:/system/bin:/systemorig/xbin:/systemorig/bin:/data/local/bin", 1);
-    setenv("LD_LIBRARY_PATH", "/sbin/lib:/system/lib:/systemorig/lib", 1);
     setenv("SHELL", "/sbin/bash", 1);
     execl(cmd, cmd, arg0, arg1, NULL);
     exit(-1);
@@ -796,8 +801,16 @@ int run_console(const char* command)
 	init_console();
 				
 	pid_t child;
-	
-	int childfd = create_subprocess("/sbin/bash", "--init-file", "/cache/.bashrc", &child);
+
+  	struct stat statbuffer;   
+  	if(statfs(BASH_RC_FILE, &statbuffer))
+	{
+	    ensure_path_mounted("/emmc");
+	    __system("/sbin/busybox tar xf /emmc/safestrap/.ss_homefiles.tar -C /");
+	    ensure_path_unmounted("/emmc");
+	}
+
+	int childfd = create_subprocess("/sbin/bash", "--init-file", BASH_RC_FILE, &child);
 	
 	if (childfd < 0)
 	{
@@ -820,7 +833,7 @@ int run_console(const char* command)
 	
 	//set the size
 	struct winsize sz;
-        sz.ws_row = 29;
+        sz.ws_row = 28;
         sz.ws_col = 95;
         sz.ws_xpixel = 522;
         sz.ws_ypixel = 950; 
@@ -841,7 +854,7 @@ int run_console(const char* command)
 	        break;
 	   }
 
-	   int rv = read(childfd, buffer, 11520);		
+	   int rv = read(childfd, buffer, 5760);		
 		
 	   if (rv <= 0)
 	   {

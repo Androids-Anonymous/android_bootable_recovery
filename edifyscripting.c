@@ -19,6 +19,7 @@
 #include <sys/limits.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 
 #include <signal.h>
 #include <sys/wait.h>
@@ -45,6 +46,28 @@
 #include "mmcutils/mmcutils.h"
 //#include "edify/parser.h"
 #include "safebootcommands.h"
+
+#define FLASH_NS_FILE "/.flash_non_safe"
+
+/*int
+allow_flash_non_safe()
+{
+    FILE* fnsfd;
+    int chars;
+    int closed;
+    struct statfs fns_info;
+    int flash_non_safe = 0;
+
+    if (!(statfs(FLASH_NS_FILE, &fns_info)))
+    {
+        fnsfd = fopen(FLASH_NS_FILE, "r");
+        char *charsin = calloc(2,sizeof(char));
+        fgets(charsin,2,fnsfd);
+        flash_non_safe = atoi(charsin);
+        closed = fclose(fnsfd);
+    }
+    return flash_non_safe;
+}*/
 
 Value* UIPrintFn(const char* name, State* state, int argc, Expr* argv[]) {
     char** args = ReadVarArgs(state, argc, argv);
@@ -132,7 +155,7 @@ Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (ReadArgs(state, argv, 1, &path) < 0) {
         return NULL;
     }
-    if (strcmp(path,BOARD_NONSAFE_SYSTEM_DEVICE) == 0) {
+    if (!(strcmp(path,BOARD_NONSAFE_SYSTEM_DEVICE)) && !(allow_flash_non_safe())) {
         /* dynamically change system block device mount to /dev/block/system alias */
         path = strdup("/dev/block/system");
     }
@@ -168,7 +191,7 @@ Value* BackupFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (ReadArgs(state, argv, 1, &path) < 0) {
         return NULL;
     }
-    if (strcmp(path,BOARD_NONSAFE_SYSTEM_DEVICE) == 0) {
+    if (!(strcmp(path,BOARD_NONSAFE_SYSTEM_DEVICE)) && !(allow_flash_non_safe())) {
         /* dynamically change system block device mount to /dev/block/system alias */
         path = strdup("/dev/block/system");
     }
@@ -257,7 +280,7 @@ Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (ReadArgs(state, argv, 1, &path) < 0) {
         return NULL;
     }
-    if (strcmp(path,BOARD_NONSAFE_SYSTEM_DEVICE) == 0) {
+    if (!(strcmp(path,BOARD_NONSAFE_SYSTEM_DEVICE)) && !(allow_flash_non_safe())) {
         /* dynamically change system block device mount to /dev/block/system alias */
         path = strdup("/dev/block/system");
     }

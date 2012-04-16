@@ -1,18 +1,18 @@
 /*
- * Copyright (C) 2007 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+* Copyright (C) 2007 The Android Open Source Project
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
@@ -47,10 +48,16 @@ static int gShowBackButton = 1;
 static int gShowBackButton = 0;
 #endif
 
-#define KEY_QUEUE_LENGTH 10 
-#define FAST_COUNT 3 
+#define SAFE 222
+#define NONSAFE 444
+#define SELECTION 666
 
-#define MAX_COLS 64 
+#define CONSOLE_DEFAULT_BACKGROUND_COLOR 40
+
+#define KEY_QUEUE_LENGTH 12 
+#define FAST_COUNT 3
+
+#define MAX_COLS 64
 #define MAX_ROWS 40
 
 #define MENU_MAX_COLS 64
@@ -59,25 +66,35 @@ static int gShowBackButton = 0;
 
 #define CHAR_WIDTH 10
 #define CHAR_HEIGHT 18
-#define SELECTION_OFFSET 2 
+#define SELECTION_OFFSET 1 
 
-#define LED_OFF   	0x00
-#define LED_ON		0x01
-#define LED_BLINK	0x02
-#define LED_BLINK_ONCE	0x03
+#define KEYBOARD_BACKLIGHT_FILE "/sys/class/leds/kpd_backlight_en/brightness"
 
-#define LED_FILE_RED		"/sys/class/leds/red/brightness"
-#define LED_FILE_GREEN		"/sys/class/leds/green/brightness"
-#define LED_FILE_BLUE		"/sys/class/leds/blue/brightness"
+#define PREFS_DIR "/cache/.safestrap/home/.prefs"
+#define ALREADY_CONFIRMED_FILE "/.already_confirmed"
+#define COLOR_CHANGE_FILE "/.color_change" 
 
-#define KEYBOARD_BACKLIGHT_FILE	"/sys/class/leds/kpd_backlight_en/brightness"
+#define SAFE_COLOR_RED_FILE "/cache/.safestrap/home/.prefs/.colors/.safe/.r"
+#define SAFE_COLOR_GREEN_FILE "/cache/.safestrap/home/.prefs/.colors/.safe/.g"
+#define SAFE_COLOR_BLUE_FILE "/cache/.safestrap/home/.prefs/.colors/.safe/.b"
+#define SAFE_COLOR_ALPHA_FILE "/cache/.safestrap/home/.prefs/.colors/.safe/.a"
+
+#define NONSAFE_COLOR_RED_FILE "/cache/.safestrap/home/.prefs/.colors/.nonsafe/.r"
+#define NONSAFE_COLOR_GREEN_FILE "/cache/.safestrap/home/.prefs/.colors/.nonsafe/.g"
+#define NONSAFE_COLOR_BLUE_FILE "/cache/.safestrap/home/.prefs/.colors/.nonsafe/.b"
+#define NONSAFE_COLOR_ALPHA_FILE "/cache/.safestrap/home/.prefs/.colors/.nonsafe/.a"
+
+#define SELECTION_COLOR_RED_FILE "/cache/.safestrap/home/.prefs/.colors/.select/.r"
+#define SELECTION_COLOR_GREEN_FILE "/cache/.safestrap/home/.prefs/.colors/.select/.g"
+#define SELECTION_COLOR_BLUE_FILE "/cache/.safestrap/home/.prefs/.colors/.select/.b"
+#define SELECTION_COLOR_ALPHA_FILE "/cache/.safestrap/home/.prefs/.colors/.select/.a"
 
 // Console UI
 #define CONSOLE_CHAR_WIDTH 10
 #define CONSOLE_CHAR_HEIGHT 18
 
 //max rows per screen
-#define CONSOLE_BUFFER_ROWS 28 
+#define CONSOLE_BUFFER_ROWS 28
 #define CONSOLE_TOTAL_ROWS (1000 + CONSOLE_BUFFER_ROWS)
 
 //max supported columns per screen
@@ -88,35 +105,35 @@ static int gShowBackButton = 0;
 #define CONSOLE_ESC 27
 
 UIParameters ui_parameters = {
-    6,       // indeterminate progress bar frames
-    20,      // fps
-    7,       // installation icon frames (0 == static image)
+    6, // indeterminate progress bar frames
+    30, // fps
+    7, // installation icon frames (0 == static image)
     13, 190, // installation icon overlay offset
 };
 
 enum
 {
-	LEFT_SIDE,
-	CENTER_TILE,
-	RIGHT_SIDE,
-	NUM_SIDES
+LEFT_SIDE,
+CENTER_TILE,
+RIGHT_SIDE,
+NUM_SIDES
 };
 
 //the structure for 24bit color
 typedef struct
 {
-	unsigned char r;
-	unsigned char g;
-	unsigned char b;
+unsigned char r;
+unsigned char g;
+unsigned char b;
 } color24;
 
 //the structure for 32bit color
 typedef struct
 {
-	unsigned char r;
-	unsigned char g;
-	unsigned char b;
-	unsigned char a;
+unsigned char r;
+unsigned char g;
+unsigned char b;
+unsigned char a;
 } color32;
 
 static pthread_mutex_t gUpdateMutex = PTHREAD_MUTEX_INITIALIZER;
@@ -128,20 +145,15 @@ static gr_surface gProgressBarFill;
 static int ui_has_initialized = 0;
 static int ui_log_stdout = 1;
 
-static pthread_cond_t led_cond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t led_mutex = PTHREAD_MUTEX_INITIALIZER;
-static color24 led_color = {.r = 0, .g = 0, .b = 1};
-static volatile unsigned int led_sts;
-
 static const struct { gr_surface* surface; const char *name; } BITMAPS[] = {
     { &gBackgroundIcon[BACKGROUND_ICON_INSTALLING], "icon_installing" },
-    { &gBackgroundIcon[BACKGROUND_ICON_ERROR],      "icon_error" },
-    { &gBackgroundIcon[BACKGROUND_ICON_CLOCKWORK],  "icon_clockwork" },
+    { &gBackgroundIcon[BACKGROUND_ICON_ERROR], "icon_error" },
+    { &gBackgroundIcon[BACKGROUND_ICON_CLOCKWORK], "icon_clockwork" },
     { &gBackgroundIcon[BACKGROUND_ICON_FIRMWARE_INSTALLING], "icon_firmware_install" },
     { &gBackgroundIcon[BACKGROUND_ICON_FIRMWARE_ERROR], "icon_firmware_error" },
-    { &gProgressBarEmpty,               "progress_empty" },
-    { &gProgressBarFill,                "progress_fill" },
-    { NULL,                             NULL },
+    { &gProgressBarEmpty, "progress_empty" },
+    { &gProgressBarFill, "progress_fill" },
+    { NULL, NULL },
 };
 
 static int gCurrentIcon = 0;
@@ -161,22 +173,22 @@ static double gProgressScopeTime, gProgressScopeDuration;
 static int gPagesIdentical = 0;
 
 //colors
-static color32 background_color = {.r = 0, .g = 0, .b = 0, .a = 160 };
-static color32 menu_color = {.r = 60, .g = 255, .b = 110, .a = 255};
-static color32 menu_sel_color = {.r = 255, .g = 255, .b = 255, .a = 255};
-static color32 danger_color = {.r = 255, .g = 215, .b = 0, .a = 255};
+color32 background_color = {.r = 0, .g = 0, .b = 0, .a = 160 };
+color32 menu_color = {.r = 60, .g = 255, .b = 110, .a = 255};
+color32 menu_sel_color = {.r = 255, .g = 255, .b = 255, .a = 255};
+color32 danger_color = {.r = 255, .g = 215, .b = 0, .a = 255};
 
 // Log text overlay, displayed when a magic key is pressed
 static char text[MAX_ROWS][MAX_COLS];
 static int text_cols = 0, text_rows = 0;
 static int text_col = 0, text_row = 0, text_top = 0;
 static int show_text = 0;
-static int show_text_ever = 0;   // has show_text ever been 1?
+static int show_text_ever = 0; // has show_text ever been 1?
 
 static char menu[MENU_MAX_ROWS][MENU_MAX_COLS];
 static int show_menu = 0;
 static int menu_top = 0, menu_items = 0, menu_sel = 0;
-static int menu_show_start = 0;             // this is line which menu display is starting at
+static int menu_show_start = 0; // this is line which menu display is starting at
 
 //console variables
 static int console_screen_rows = 0;
@@ -184,34 +196,36 @@ static int console_screen_columns = 0;
 
 //console system colors
 static color24 console_header_color = {.r = 255, .g = 255, .b = 0};
-static color24 console_background_color =  {.r = 0, .g = 0, .b = 0};
-static color24 console_front_color =  {.r = 229, .g = 229, .b = 229};
+static color24 console_background_color = {.r = 0, .g = 0, .b = 0};
+static color24 console_front_color = {.r = 229, .g = 229, .b = 229};
 
 static color24 console_term_colors[] =
 {
-	{ .r=0,   .g=0,   .b=0   }, //CLR30
-	{ .r=205, .g=0,   .b=0   }, //CLR31
-	{ .r=0,   .g=205, .b=0   }, //CLR32
-	{ .r=205, .g=205, .b=0   }, //CLR33
-	{ .r=0,   .g=0,   .b=238 }, //CLR34
-	{ .r=205, .g=0,   .b=205 }, //CLR35
-	{ .r=0,   .g=205, .b=205 }, //CLR36
-	{ .r=229, .g=229, .b=229 }, //CLR37
+{ .r=0, .g=0, .b=0 }, //CLR30
+{ .r=205, .g=0, .b=0 }, //CLR31
+{ .r=0, .g=205, .b=0 }, //CLR32
+{ .r=205, .g=205, .b=0 }, //CLR33
+{ .r=0, .g=0, .b=238 }, //CLR34
+{ .r=205, .g=0, .b=205 }, //CLR35
+{ .r=0, .g=205, .b=205 }, //CLR36
+{ .r=229, .g=229, .b=229 }, //CLR37
 
-	{ .r=127, .g=127, .b=127 }, //CLR90
-	{ .r=255, .g=0,   .b=0   }, //CLR91
-	{ .r=0,   .g=255, .b=0   }, //CLR92
-	{ .r=255, .g=255, .b=0   }, //CLR93
-	{ .r=92,  .g=91,  .b=255 }, //CLR94
-	{ .r=255, .g=0,   .b=255 }, //CLR95
-	{ .r=0,   .g=255, .b=255 }, //CLR96
-	{ .r=255, .g=255, .b=255 }, //CLR97
+{ .r=127, .g=127, .b=127 }, //CLR90
+{ .r=255, .g=0, .b=0 }, //CLR91
+{ .r=0, .g=255, .b=0 }, //CLR92
+{ .r=255, .g=255, .b=0 }, //CLR93
+{ .r=92, .g=91, .b=255 }, //CLR94
+{ .r=255, .g=0, .b=255 }, //CLR95
+{ .r=0, .g=255, .b=255 }, //CLR96
+{ .r=255, .g=255, .b=255 }, //CLR97
 };
 
 //Rows increased for printing history
 static char console_text[CONSOLE_TOTAL_ROWS][CONSOLE_MAX_COLUMNS];
 static color24 console_text_color[CONSOLE_TOTAL_ROWS][CONSOLE_MAX_COLUMNS];
+static color24 console_background_text_color[CONSOLE_TOTAL_ROWS][CONSOLE_MAX_COLUMNS];
 static color24 console_current_color;
+static color24 console_current_back_color;
 
 static int console_top_row = 0;
 static int console_force_top_row_on_text = 0;
@@ -238,6 +252,113 @@ unsigned fast = 0;
 unsigned keyheld = 0;
 int last_code = 0;
 
+
+int
+set_already_confirmed_prefs(int ac_set)
+{
+    FILE* ac_fd;
+    int ac_chars;
+    int ac_closed;
+    ac_fd = fopen(ALREADY_CONFIRMED_FILE, "w");
+    if (ac_set)
+    {
+	ac_chars = fwrite("1\n", sizeof(char), 2, ac_fd);
+    }
+    else
+    {
+	ac_chars = fwrite("0\n", sizeof(char), 2, ac_fd);
+    }
+    ac_closed = fclose(ac_fd);
+    if ((ac_chars == 2) && !ac_closed)
+    {
+	return 0;
+    } else return 1;
+}
+
+int
+set_color_change(int cc_set)
+{
+    FILE* cc_fd;
+    int cc_chars;
+    int cc_closed;
+    cc_fd = fopen(COLOR_CHANGE_FILE, "w");
+    if (cc_set)
+    {
+	cc_chars = fwrite("1\n", sizeof(char), 2, cc_fd);
+    }
+    else
+    {
+	cc_chars = fwrite("0\n", sizeof(char), 2, cc_fd);
+    }
+    cc_closed = fclose(cc_fd);
+    if ((cc_chars == 2) && !cc_closed)
+    {
+	return 0;
+    } else return 1;
+}
+
+int
+get_already_confirmed_prefs()
+{
+    FILE* ac_fd;
+    int ac_chars;
+    int ac_closed;
+    struct stat ac_info;
+    int checked = 0;
+    
+    if (!(stat(ALREADY_CONFIRMED_FILE, &ac_info)))
+    {
+    	ac_fd = fopen(ALREADY_CONFIRMED_FILE, "r");
+	char *ac_charsin = calloc(2,sizeof(char));
+	fgets(ac_charsin,2,ac_fd);
+	checked = atoi(ac_charsin);	
+	ac_closed = fclose(ac_fd);
+    } else {
+	    fprintf(stderr,"couldn't stat confirmed file\n");
+    }    
+    return checked;
+}
+
+int
+get_color_change()
+{
+    FILE* cc_fd;
+    int cc_chars;
+    int cc_closed;
+    struct stat cc_info;
+    int change = 0;
+    
+    if (!(stat(COLOR_CHANGE_FILE, &cc_info)))
+    {
+    	cc_fd = fopen(COLOR_CHANGE_FILE, "r");
+	char *cc_charsin = calloc(2,sizeof(char));
+	fgets(cc_charsin,2,cc_fd);
+	change = atoi(cc_charsin);	
+	cc_closed = fclose(cc_fd);
+    } else {
+	fprintf(stderr,"couldn't stat color_change file\n");
+    }  
+    return change;
+}
+
+// check if safestrap directory on /cache contains the .prefs directory and if
+// not, make sure they are copied over from the sdcard
+int ensure_prefs_exist()
+{
+    if(get_already_confirmed_prefs())
+	return 0;
+
+    struct stat prefs_info;   
+    
+    if (stat(PREFS_DIR, &prefs_info))
+    {
+	ensure_path_mounted("/emmc");
+	system("/sbin/busybox tar xf /emmc/safestrap/.ss_homefiles.tar -C /");
+	ensure_path_unmounted("/emmc");
+    }
+    return 0;
+}
+
 // Return the current time as a double (including fractions of a second).
 static double now() {
     struct timeval tv;
@@ -245,10 +366,259 @@ static double now() {
     return tv.tv_sec + tv.tv_usec / 1000000.0;
 }
 
-// Draw the given frame over the installation overlay animation.  The
+unsigned char get_ext_color_pref(int color_type, char rgba) {
+
+    int clr;
+    FILE *fp = NULL;
+    struct stat color_info;   
+ 
+    switch (color_type)
+    {
+	case SAFE:
+	{
+	    switch (rgba)
+	    {
+		case 'r':
+		{
+    	    	    if (!(stat(SAFE_COLOR_RED_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SAFE_COLOR_RED_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 59;
+            	    }
+            	    else
+            	    {
+			clr = 59;
+            	    }
+		    break;
+		}
+		case 'g':
+		{
+    	    	    if (!(stat(SAFE_COLOR_GREEN_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SAFE_COLOR_GREEN_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+		case 'b':
+		{
+    	    	    if (!(stat(SAFE_COLOR_BLUE_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SAFE_COLOR_BLUE_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 110;
+            	    }
+            	    else
+            	    {
+			clr = 110;
+            	    }
+		    break;
+		}
+		case 'a':
+		{
+    	    	    if (!(stat(SAFE_COLOR_ALPHA_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SAFE_COLOR_ALPHA_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+	    }
+	    break;
+	}
+	case NONSAFE:
+	{
+	    switch (rgba)
+	    {
+		case 'r':
+		{
+    	    	    if (!(stat(NONSAFE_COLOR_RED_FILE, &color_info)))
+    	    	    {
+			fp = fopen(NONSAFE_COLOR_RED_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+		case 'g':
+		{
+    	    	    if (!(stat(NONSAFE_COLOR_GREEN_FILE, &color_info)))
+    	    	    {
+			fp = fopen(NONSAFE_COLOR_GREEN_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 215;
+            	    }
+            	    else
+            	    {
+			clr = 215;
+            	    }
+		    break;
+		}
+		case 'b':
+		{
+    	    	    if (!(stat(NONSAFE_COLOR_BLUE_FILE, &color_info)))
+    	    	    {
+			fp = fopen(NONSAFE_COLOR_BLUE_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 0;
+            	    }
+            	    else
+            	    {
+			clr = 0;
+            	    }
+		    break;
+		}
+		case 'a':
+		{
+    	    	    if (!(stat(NONSAFE_COLOR_ALPHA_FILE, &color_info)))
+    	    	    {
+			fp = fopen(NONSAFE_COLOR_ALPHA_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+	    }
+	    break;
+	}
+	case SELECTION:
+	{
+	    switch (rgba)
+	    {
+		case 'r':
+		{
+    	    	    if (!(stat(SELECTION_COLOR_RED_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SELECTION_COLOR_RED_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+		case 'g':
+		{
+    	    	    if (!(stat(SELECTION_COLOR_GREEN_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SELECTION_COLOR_GREEN_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+		case 'b':
+		{
+    	    	    if (!(stat(SELECTION_COLOR_BLUE_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SELECTION_COLOR_BLUE_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+		case 'a':
+		{
+    	    	    if (!(stat(SELECTION_COLOR_ALPHA_FILE, &color_info)))
+    	    	    {
+			fp = fopen(SELECTION_COLOR_ALPHA_FILE,"r");
+			char *smc = calloc(4,sizeof(char));
+			fgets(smc,4,fp);
+			if(!fclose(fp))
+			    clr = atoi(smc);
+			else
+			    clr = 255;
+            	    }
+            	    else
+            	    {
+			clr = 255;
+            	    }
+		    break;
+		}
+	    }
+	    break;
+	}
+    }
+return (unsigned char)clr;
+}
+
+// Draw the given frame over the installation overlay animation. The
 // background is not cleared or draw with the base icon first; we
 // assume that the frame already contains some other frame of the
-// animation.  Does nothing if no overlay animation is defined.
+// animation. Does nothing if no overlay animation is defined.
 // Should only be called with gUpdateMutex locked.
 static void draw_install_overlay_locked(int frame) {
     if (gInstallationOverlay == NULL) return;
@@ -281,7 +651,7 @@ static void draw_background_locked(int icon)
     }
 }
 
-// Draw the progress bar (if any) on the screen.  Does not flip pages.
+// Draw the progress bar (if any) on the screen. Does not flip pages.
 // Should only be called with gUpdateMutex locked.
 static void draw_progress_locked()
 {
@@ -321,7 +691,8 @@ static void draw_progress_locked()
     }
 }
 
-static void draw_text_line(int row, const char* t, int offset) {
+static void
+draw_text_line(int row, const char* t, int offset) {
   if (t[0] != '\0') {
     gr_text((offset*CHAR_WIDTH), (row+1)*CHAR_HEIGHT-1, t);
   }
@@ -334,33 +705,51 @@ draw_console_cursor(int row, int column, char letter)
 		return;
 
 	gr_color(console_front_color.r, console_front_color.g, console_front_color.b, 255);
-	gr_fill_l((column * CONSOLE_CHAR_WIDTH), row * CONSOLE_CHAR_HEIGHT , (column+1)*CONSOLE_CHAR_WIDTH, (row+1)*CONSOLE_CHAR_HEIGHT);
+	gr_fill_l((column * CONSOLE_CHAR_WIDTH), (((row+1) * CONSOLE_CHAR_HEIGHT)+14) , (column+1)*CONSOLE_CHAR_WIDTH, (((row+2)*CONSOLE_CHAR_HEIGHT)));
 
 	if (letter != '\0')
 	{
-		gr_color(console_background_color.r, console_background_color.g, console_background_color.b, 255);
+		//gr_color(console_background_color.r, console_background_color.g, console_background_color.b, 255);
 
 		char text[2];
 		text[0] = letter;
 		text[1] = '\0';
 
-		gr_text_l(column * CONSOLE_CHAR_WIDTH, (row+1)*CONSOLE_CHAR_HEIGHT-1, text);
+		gr_text_l(column * CONSOLE_CHAR_WIDTH, (row+2)*CONSOLE_CHAR_HEIGHT-1, text);
 	}
 }
 
 static void
-draw_console_line(int row, const char* t, const color24* c) {
+draw_console_line(int row, const char* t, const color24* c, const color24* cb) {
 
   char letter[2];
   letter[1] = '\0';
+  char *t2 = strdup(t);
 
   int i = 0;
 
   while(t[i] != '\0')
   {
   	letter[0] = t[i];
-  	gr_color(c[i].r, c[i].g, c[i].b, 255);
-        gr_text_l(i * CONSOLE_CHAR_WIDTH, (row+1)*CONSOLE_CHAR_HEIGHT-1, letter);
+	gr_color(cb[i].r, cb[i].g, cb[i].b, 255);
+	gr_fill_l(((i) * CONSOLE_CHAR_WIDTH), ((row+1) * CONSOLE_CHAR_HEIGHT) , (i+1)*CONSOLE_CHAR_WIDTH, ((row+2)*CONSOLE_CHAR_HEIGHT));
+	//gr_color(c[i].r, c[i].g, c[i].b, 255);
+        //gr_text_l(i * CONSOLE_CHAR_WIDTH, (row+1)*CONSOLE_CHAR_HEIGHT-1, letter);
+	i++;
+  }
+
+  i = 0;
+  
+  char letter2[2];
+  letter2[1] = '\0';
+
+  while(t2[i] != '\0')
+  {
+  	letter2[0] = t2[i];
+	//gr_color(cb[i].r, cb[i].g, cb[i].b, 255);
+	//gr_fill_l(((i+1) * CONSOLE_CHAR_WIDTH), (row * CONSOLE_CHAR_HEIGHT) , (i+2)*CONSOLE_CHAR_WIDTH, (((row+1)*CONSOLE_CHAR_HEIGHT)-1));
+	gr_color(c[i].r, c[i].g, c[i].b, 255);
+        gr_text_l(i * CONSOLE_CHAR_WIDTH, (row+2)*CONSOLE_CHAR_HEIGHT-1, letter2);
 	i++;
   }
 }
@@ -376,7 +765,7 @@ draw_console_locked()
 	int i;
 	for (i = console_top_row; i < console_top_row + console_screen_rows; i++)
 	{
-		draw_console_line(i - console_top_row, console_text[i], console_text_color[i]);
+		draw_console_line(i - console_top_row, console_text[i], console_text_color[i], console_background_text_color[i]);
 
 		if (i == console_cur_row)
 		{
@@ -404,7 +793,30 @@ static void draw_screen_locked(void)
 
     draw_background_locked(gCurrentIcon);
     draw_progress_locked();
+    
+    if(get_color_change())
+    {
+	set_color_change(0);
+	
+	ensure_prefs_exist();
 
+	menu_color.r = get_ext_color_pref(SAFE,'r');
+	menu_color.g = get_ext_color_pref(SAFE,'g');
+	menu_color.b = get_ext_color_pref(SAFE,'b'); 
+	menu_color.a = get_ext_color_pref(SAFE,'a');
+	    
+	menu_sel_color.r = get_ext_color_pref(SELECTION,'r');
+	menu_sel_color.g = get_ext_color_pref(SELECTION,'g'); 
+	menu_sel_color.b = get_ext_color_pref(SELECTION,'b'); 
+	menu_sel_color.a = get_ext_color_pref(SELECTION,'a');
+	    
+	danger_color.r = get_ext_color_pref(NONSAFE,'r');
+	danger_color.g = get_ext_color_pref(NONSAFE,'g');
+	danger_color.b = get_ext_color_pref(NONSAFE,'b'); 
+	danger_color.a = get_ext_color_pref(NONSAFE,'a');
+	
+    }
+	    
     if (show_text) {
         gr_color(background_color.r, background_color.g, background_color.b, background_color.a);
         gr_fill(0, 0, gr_fb_width(), gr_fb_height());
@@ -437,38 +849,50 @@ static void draw_screen_locked(void)
         } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
             for (i = menu_show_start + menu_top; i < (menu_show_start + menu_top + j); ++i) {
                 if (i == menu_top + menu_sel) {
-            	  if(get_safe_mode()){
-          	    gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
-        	  } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
-                    draw_text_line(i - menu_show_start, menu[i], 0);
-		    gr_color(menu_sel_color.r, menu_sel_color.g, menu_sel_color.b, menu_sel_color.a);
-		    char *menu_c = menu[i] + 2;
-		    char *charp = strdup(menu_c);
+            	  
+		    // remove all text in the line by overwriting with the background color
+        	    gr_color(background_color.r, background_color.g, background_color.b, background_color.a);
+		    draw_text_line(i - menu_show_start, menu[i], 0);
 		    
-		    // Droid 3 screen is capable of showing 53 characters in
-		    // the recovery
-		    char charp2[53];
+		    gr_color(menu_sel_color.r, menu_sel_color.g, menu_sel_color.b, menu_sel_color.a);
+		    
+		    // increment pointer by 2 chars to facilitate "shifting" of menu selection
+		    // left one character
+		    char *menu_c = menu[i] + 2;
+		    char *charp = strndup(menu_c, 47);
+		    
                     // don't want the last few characters to be highlighted
-		    strncpy(charp2, charp, 47);
-		    charp2[48]='\0'; 
-		    draw_text_line(i - menu_show_start , charp2, SELECTION_OFFSET);
-                    if(get_safe_mode()){
-          gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
-        } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
+		    //strncpy(charp2, charp, 46);
+		    //charp2[47]='\0'; 
+		    draw_text_line(i - menu_show_start , charp, SELECTION_OFFSET);
+		    
+		    // choose color based on safe/non-safe mode
+		    if(get_safe_mode()) {
+          	        gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
+        	    } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
+		   
+		    // skip the last pipe character if we get to the "BACK" row....
+		    // purely cosmetic.   
+		    if (i < (menu_show_start + menu_top + j - 1)) {
+		    	draw_text_line(i - menu_show_start , "||                                                |/|", 0);
+		    } else draw_text_line(i - menu_show_start , "||                                                |/ ", 0);
+
                 } else {
-                    if(get_safe_mode()){
-          gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
-        } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
-                    draw_text_line(i - menu_show_start, menu[i], 0);
+                    
+		   if(get_safe_mode()){
+          		gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
+        	   } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
+                   draw_text_line(i - menu_show_start, menu[i], 0);
                 }
+
                 row++;
             }
-            gr_fill(5, row*CHAR_HEIGHT+1,
-                    (gr_fb_width()-((3*CHAR_WIDTH)+2)), row*CHAR_HEIGHT+2);
+            gr_fill(5, row*CHAR_HEIGHT+1, (gr_fb_width()-((3*CHAR_WIDTH)+2)), row*CHAR_HEIGHT+2);
         }
         if(get_safe_mode()){
-          gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
+            gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);  
+	
 	for (; row < text_rows; ++row) {
             draw_text_line(row, text[(row+text_top) % text_rows], 0);
         }
@@ -489,146 +913,14 @@ static void update_screen_locked(void)
 static void update_progress_locked(void)
 {
     if (!ui_has_initialized) return;
-    if (show_text || !gPagesIdentical) {
-        draw_screen_locked();    // Must redraw the whole screen
-        gPagesIdentical = 1;
-    } else {
+    //if (show_text || !gPagesIdentical) {
+    //if ( !gPagesIdentical) {
+    //    draw_screen_locked();    // Must redraw the whole screen
+    //    gPagesIdentical = 1;
+    //} else {
         draw_progress_locked();  // Draw only the progress bar and overlays
-    }
+    //}
     gr_flip();
-}
-
-void ui_led_toggle(int state)
-{
-	pthread_mutex_lock(&led_mutex);
-
-  if(state)
-   led_sts = LED_ON;
-  else
-   led_sts = LED_OFF;
-  
-  pthread_cond_signal(&led_cond); 
-  pthread_mutex_unlock(&led_mutex);
-}
-
-void ui_led_blink(int continuously)
-{
-	pthread_mutex_lock(&led_mutex);
-
-  if(continuously)
-   led_sts = LED_BLINK;
-  else
-   led_sts = LED_BLINK_ONCE;
-  
-  pthread_cond_signal(&led_cond); 
-  pthread_mutex_unlock(&led_mutex);
-  
-}
-
-static void
-led_on(FILE* ledfp_r, FILE* ledfp_g, FILE* ledfp_b)
-{
-	if (led_color.r)
-	{
-		fwrite("1", 1, 1, ledfp_r);
-		fflush(ledfp_r);
-	}
-	
-	if (led_color.g)
-	{
-		fwrite("1", 1, 1, ledfp_g);
-		fflush(ledfp_g);
-	}
-		
-	if (led_color.b)
-	{
-		fwrite("1", 1, 1, ledfp_b);
-		fflush(ledfp_b);
-	}
-}
-
-static void
-led_off(FILE* ledfp_r, FILE* ledfp_g, FILE* ledfp_b)
-{
-	fwrite("0", 1, 1, ledfp_r);
-	fwrite("0", 1, 1, ledfp_g);
-	fwrite("0", 1, 1, ledfp_b);
-	
-	fflush(ledfp_r);
-	fflush(ledfp_g);
-	fflush(ledfp_b);
-}
-
-static void*
-led_thread(void *cookie)
-{
-  unsigned int state = 0;
-  unsigned int waitperiod = 0;
-  FILE *ledfp_r, *ledfp_g, *ledfp_b;
-  
-  ledfp_r = fopen(LED_FILE_RED, "w");
-  ledfp_g = fopen(LED_FILE_GREEN, "w");
-  ledfp_b = fopen(LED_FILE_BLUE, "w");
-
-  while(1) 
-  {
-  	pthread_mutex_lock(&led_mutex);
-  	
-  	switch (led_sts)
-  	{
-  		case LED_OFF:
-  			state = 0;
-				led_off(ledfp_r, ledfp_g, ledfp_b);
-  			
-  			while (led_sts == LED_OFF) 
-					pthread_cond_wait(&led_cond, &led_mutex);
-					
-				break;
-				
-			case LED_ON:
-				state = 1;
-				led_on(ledfp_r, ledfp_g, ledfp_b);	
-  			
-  			while (led_sts == LED_ON) 
-					pthread_cond_wait(&led_cond, &led_mutex);
-					
-				break;
-				
-			case LED_BLINK_ONCE:
-				state = 1;
-			
-				led_on(ledfp_r, ledfp_g, ledfp_b);	
-				waitperiod = 500000;
-				led_sts = LED_OFF;
-				
-				break;
-				
-			case LED_BLINK:
-				state = state ? 0 : 1;
-				
-				if (state)
-					led_on(ledfp_r, ledfp_g, ledfp_b);
-				else
-					led_off(ledfp_r, ledfp_g, ledfp_b);
-			
-				waitperiod = 500000;
-				break;	
-  	}
-  	
-  	pthread_mutex_unlock(&led_mutex);
-  	
-  	//when blinking, we want to finish it, not interrupt it
-		if (waitperiod > 0)
-		{
-  		usleep(waitperiod);
-  		waitperiod = 0;
-  	}
-  }
-  
-  fclose(ledfp_r);
-  fclose(ledfp_g);
-  fclose(ledfp_b);
-  return NULL;
 }
 
 // Keeps the progress bar updated, even when the process is otherwise busy.
@@ -644,7 +936,7 @@ static void *progress_thread(void *cookie)
         // update the installation animation, if active
         // skip this if we have a text overlay (too expensive to update)
         if (gCurrentIcon == BACKGROUND_ICON_INSTALLING &&
-            ui_parameters.installing_frames > 0) {
+            ui_parameters.installing_frames > 0 && !show_text) {
             gInstallingFrame =
                 (gInstallingFrame + 1) % ui_parameters.installing_frames;
             redraw = 1;
@@ -652,7 +944,8 @@ static void *progress_thread(void *cookie)
 
         // update the progress bar animation, if active
         // skip this if we have a text overlay (too expensive to update)
-        if (gProgressBarType == PROGRESSBAR_TYPE_INDETERMINATE && !show_text) {
+        //if (gProgressBarType == PROGRESSBAR_TYPE_INDETERMINATE && !show_text) {
+        if (gProgressBarType == PROGRESSBAR_TYPE_INDETERMINATE) {
             redraw = 1;
         }
 
@@ -672,9 +965,9 @@ static void *progress_thread(void *cookie)
 
         pthread_mutex_unlock(&gUpdateMutex);
         double end = now();
-        // minimum of 20ms delay between frames
+        // minimum of 50ms (ie: 20fps) delay between frames
         double delay = interval - (end-start);
-        if (delay < 0.02) delay = 0.02;
+        if (delay < 0.05) delay = 0.05;
         usleep((long)(delay * 1000000));
     }
     return NULL;
@@ -726,7 +1019,7 @@ input_thread (void *cookie)
 				keyheld_count = 0;
 				if (fast)
 				{
-					key_queue_len = 0;
+					key_queue_len = 1;
 					fast = 0;
 				}
 			  } 
@@ -736,15 +1029,15 @@ input_thread (void *cookie)
 				keyheld_count = 0;
 				if (fast)
 				{
-					key_queue_len = 0;
+					key_queue_len = 1;
 					fast = 0;
 				}
 			} 
 		    
 		    } else
 		    { 
-			// Don't want to have fast mode kick in while scrolling the menu/selecting entires
-			if ((keyheld) && (ev.code != KEY_VOLUMEUP) && (ev.code != KEY_VOLUMEDOWN) && (ev.code != KEY_ENTER) && (ev.code != KEY_CENTER) && (ev.code != KEY_END))
+			// Don't want to have fast mode kick in while scrolling the menu/selecting entries
+			if ((keyheld) && (ev.code != KEY_ENTER) && (ev.code != KEY_CENTER) && (ev.code != KEY_END))
 			{
 				keyheld_count++;
 				if (keyheld_count >= FAST_COUNT)
@@ -807,7 +1100,7 @@ console_cursor_thread(void *cookie)
 			update_screen_locked();
 			pthread_mutex_unlock(&gUpdateMutex);
 		} 
-		usleep(20000);
+		usleep(100000);
 	}
 	return NULL;
 }
@@ -818,6 +1111,7 @@ void ui_init(void)
     fprintf(stderr,"ui has initialized.\n");
     gr_init();
     ev_init();
+    set_color_change(1);
 
     text_col = text_row = 0;
     text_rows = gr_fb_height() / CHAR_HEIGHT;
@@ -876,7 +1170,6 @@ void ui_init(void)
     pthread_t t;
     pthread_create(&t, NULL, progress_thread, NULL);
     pthread_create(&t, NULL, input_thread, NULL);
-    pthread_create(&t, NULL, led_thread, NULL);
 
 }
 
@@ -1036,7 +1329,7 @@ int ui_start_menu(char** headers, char** items, int initial_selection) {
         }
 
         if (gShowBackButton) {
-            sprintf(menu[i],  "| <<===================[BACK]==================== |/ ");
+            sprintf(menu[i],  "|| <<===================[back]=================== |/ ");
             ++i;
         }
 
@@ -1202,13 +1495,14 @@ void ui_console_begin()
 	console_escaped_state = 0;
 
 	//calculate the number of columns and rows
-	console_screen_rows = ui_console_get_height() / CONSOLE_CHAR_HEIGHT -1;
+	console_screen_rows = ui_console_get_height() / CONSOLE_CHAR_HEIGHT -2;
 	console_screen_columns = ui_console_get_width() / CONSOLE_CHAR_WIDTH + 1;// + 1; //+1 for null terminator
 	console_force_top_row_on_text = 0;
 	console_force_top_row_reserve = 1 - console_screen_rows;
 
 	memset(console_text, ' ', (CONSOLE_TOTAL_ROWS) * (console_screen_columns));
 	memset(console_text_color, 0, (CONSOLE_TOTAL_ROWS) * (console_screen_columns) * sizeof(color24));
+	memset(console_background_text_color, 0, (CONSOLE_TOTAL_ROWS) * (console_screen_columns) * sizeof(color24));
 
 	int i;
 	int j;
@@ -1225,6 +1519,7 @@ void ui_console_begin()
 		console_text[i][console_screen_columns - 1] = '\0';
 	}
 	console_current_color = console_front_color;
+	console_current_back_color = console_background_color;
 
 	pthread_t t;
 	pthread_create(&t, NULL, console_cursor_thread, NULL);
@@ -1326,11 +1621,11 @@ void ui_console_get_system_front_color(int which, unsigned char* r, unsigned cha
 		case CONSOLE_HEADER_COLOR:
 			c = console_header_color;
 			break;
-
+		/*
 		case CONSOLE_DEFAULT_BACKGROUND_COLOR:
 			c = console_background_color;
 			break;
-
+		*/
 		case CONSOLE_DEFAULT_FRONT_COLOR:
 			c = console_front_color;
 			break;
@@ -1348,15 +1643,22 @@ void ui_console_set_system_front_color(int which)
 		case CONSOLE_HEADER_COLOR:
 			console_current_color = console_header_color;
 			break;
-
+		/*
 		case CONSOLE_DEFAULT_BACKGROUND_COLOR:
 			console_current_color = console_background_color;
 			break;
-
+		*/
 		case CONSOLE_DEFAULT_FRONT_COLOR:
 			console_current_color = console_front_color;
 			break;
 	}
+}
+
+void ui_console_get_back_color(unsigned char* r, unsigned char* g, unsigned char* b)
+{
+	*r = console_current_back_color.r;
+	*g = console_current_back_color.g;
+	*b = console_current_back_color.b;
 }
 
 void ui_console_get_front_color(unsigned char* r, unsigned char* g, unsigned char* b)
@@ -1366,6 +1668,13 @@ void ui_console_get_front_color(unsigned char* r, unsigned char* g, unsigned cha
 	*b = console_current_color.b;
 }
 
+void ui_console_set_back_color(unsigned char r, unsigned char g, unsigned char b)
+{
+	console_current_back_color.r = r;
+	console_current_back_color.g = g;
+	console_current_back_color.b = b;
+}
+
 void ui_console_set_front_color(unsigned char r, unsigned char g, unsigned char b)
 {
 	console_current_color.r = r;
@@ -1373,14 +1682,23 @@ void ui_console_set_front_color(unsigned char r, unsigned char g, unsigned char 
 	console_current_color.b = b;
 }
 
+void console_set_back_term_color(int ascii_code)
+{
+	if (ascii_code >= 40 && ascii_code <= 47)
+		ui_console_set_back_color(
+			console_term_colors[ascii_code - 40].r,
+			console_term_colors[ascii_code - 40].g,
+			console_term_colors[ascii_code - 40].b);
+}
+
 void console_set_front_term_color(int ascii_code)
 {
-	if (ascii_code >= 30 && ascii_code < 37)
+	if (ascii_code >= 30 && ascii_code <= 37)
 		ui_console_set_front_color(
 			console_term_colors[ascii_code - 30].r,
 			console_term_colors[ascii_code - 30].g,
 			console_term_colors[ascii_code - 30].b);
-	else if (ascii_code >= 90 && ascii_code < 97)
+	else if (ascii_code >= 90 && ascii_code <= 97)
 		ui_console_set_front_color(
 			console_term_colors[ascii_code - 90 + 8].r,
 			console_term_colors[ascii_code - 90 + 8].g,
@@ -1441,13 +1759,13 @@ console_put_char(char c)
 			break;
 
 		case CONSOLE_BEEP: //BELL - use LED for that
-			ui_led_blink(0);
 			vibrate(30);
 			break;
 
 		default:
 			console_text[console_cur_row][console_cur_column] = c;
 			console_text_color[console_cur_row][console_cur_column] = console_current_color;
+			console_background_text_color[console_cur_row][console_cur_column] = console_current_back_color;
 			console_cur_column++;
 
 			if (console_cur_column > console_screen_columns - 2)
@@ -1468,6 +1786,7 @@ console_put_char(char c)
 		{
 			memcpy(console_text[j], console_text[j + shift], console_screen_columns);
 			memcpy(console_text_color[j], console_text_color[j + shift], console_screen_columns * sizeof(color24));
+			memcpy(console_background_text_color[j], console_background_text_color[j + shift], console_screen_columns * sizeof(color24));
 		}
 
 		for (j = CONSOLE_TOTAL_ROWS - CONSOLE_BUFFER_ROWS; j < CONSOLE_TOTAL_ROWS; j++)
@@ -1475,6 +1794,7 @@ console_put_char(char c)
 			memset(console_text[j], ' ', console_screen_columns);
 			console_text[j][console_screen_columns - 1] = '\0';
 			memset(console_text_color[j], 0, console_screen_columns * sizeof(color24));
+			memset(console_background_text_color[j], 0, console_screen_columns * sizeof(color24));
 		}
 
 		console_cur_row -= shift;
@@ -1602,6 +1922,7 @@ console_unescape()
 				for (j = console_cur_column; j < (console_screen_columns - 1); j++)
 				{
 					console_text[console_cur_row][j] = ' ';
+					console_background_text_color[console_cur_row][j] = console_background_color;
 					console_text_color[console_cur_row][j].r = 0;
 					console_text_color[console_cur_row][j].g = 0;
 					console_text_color[console_cur_row][j].b = 0;
@@ -1612,6 +1933,7 @@ console_unescape()
 					memset(console_text[j], ' ', console_screen_columns);
 					console_text[j][console_screen_columns - 1] = '\0';
 					memset(console_text_color[j], 0, console_screen_columns * sizeof(color24));
+					memset(console_background_text_color[j], 0, console_screen_columns * sizeof(color24));
 				}
 				was_unescaped = 1;
 				break;
@@ -1623,6 +1945,7 @@ console_unescape()
 					for (j = console_cur_column; j < (console_screen_columns - 1); j++)
 					{
 						console_text[console_cur_row][j] = ' ';
+						console_background_text_color[console_cur_row][j] = console_background_color;
 						console_text_color[console_cur_row][j].r = 0;
 						console_text_color[console_cur_row][j].g = 0;
 						console_text_color[console_cur_row][j].b = 0;
@@ -1633,6 +1956,7 @@ console_unescape()
 					for (j = 0; j <= console_cur_column; j++)
 					{
 						console_text[console_cur_row][j] = ' ';
+						console_background_text_color[console_cur_row][j] = console_background_color;
 						console_text_color[console_cur_row][j].r = 0;
 						console_text_color[console_cur_row][j].g = 0;
 						console_text_color[console_cur_row][j].b = 0;
@@ -1643,6 +1967,7 @@ console_unescape()
 					for (j = 0; j < (console_screen_columns - 1); j++)
 					{
 						console_text[console_cur_row][j] = ' ';
+						console_background_text_color[console_cur_row][j] = console_background_color;
 						console_text_color[console_cur_row][j].r = 0;
 						console_text_color[console_cur_row][j].g = 0;
 						console_text_color[console_cur_row][j].b = 0;
@@ -1667,8 +1992,14 @@ console_unescape()
 					switch (parameters[i])
 					{
 						case 0: //reset
+							ui_console_set_system_front_color(CONSOLE_DEFAULT_FRONT_COLOR);
+							console_set_back_term_color(CONSOLE_DEFAULT_BACKGROUND_COLOR);
+							break;
 						case 39: //default text color
 							ui_console_set_system_front_color(CONSOLE_DEFAULT_FRONT_COLOR);
+							break;
+						case 49: //default background color
+							console_set_back_term_color(CONSOLE_DEFAULT_BACKGROUND_COLOR);
 							break;
 						case 30:
 						case 31:
@@ -1687,6 +2018,16 @@ console_unescape()
 						case 96:
 						case 97:
 							console_set_front_term_color(parameters[i]);
+							break;
+						case 40:
+						case 41:
+						case 42:
+						case 43:
+						case 44:
+						case 45:
+						case 46:
+						case 47:
+							console_set_back_term_color(parameters[i]);
 							break;
 					}
 				}

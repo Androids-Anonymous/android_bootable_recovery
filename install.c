@@ -22,7 +22,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "common.h"
 #include "install.h"
 #include "mincrypt/rsa.h"
 #include "minui/minui.h"
@@ -337,7 +336,7 @@ exit:
 int
 install_package(const char *path)
 {
-    ui_set_background(BACKGROUND_ICON_INSTALLING);
+    //ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_print("Finding update package...\n");
     ui_show_indeterminate_progress();
     LOGI("Update location: %s\n", path);

@@ -23,6 +23,7 @@
 
 // Initialize the graphics system.
 void ui_init();
+unsigned char get_ext_color_pref(int color_type, char rgba); 
 
 // Use KEY_* codes from <linux/input.h> or KEY_DREAM_* from "minui/minui.h".
 int ui_get_key();                                                       // returns keycode if a key event is pending
@@ -155,6 +156,9 @@ typedef struct {
 // fopen a file, mounting volumes and making parent dirs as necessary.
 FILE* fopen_path(const char *path, const char *mode);
 
+// erase a given volume
+int erase_volume(const char *volume);
+
 /****************************************************************************************
  * Console functions
  ***************************************************************************************/
@@ -191,7 +195,7 @@ void ui_console_scroll_down(int num_rows);
 
 enum {
   CONSOLE_HEADER_COLOR,
-  CONSOLE_DEFAULT_BACKGROUND_COLOR,
+  //CONSOLE_DEFAULT_BACKGROUND_COLOR,
   CONSOLE_DEFAULT_FRONT_COLOR
 };
 

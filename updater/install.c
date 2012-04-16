@@ -16,31 +16,100 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <limits.h>
+#include <linux/input.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mount.h>
+#include <sys/ioctl.h>
+#include <sys/reboot.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <termios.h>
 #include <unistd.h>
+#include <sys/mount.h>
+#include <sys/vfs.h>
 
 #include "cutils/misc.h"
 #include "cutils/properties.h"
 #include "edify/expr.h"
 #include "mincrypt/sha.h"
 #include "minzip/DirUtil.h"
-#include "mounts.h"
 #include "mtdutils/mtdutils.h"
 #include "updater.h"
 #include "applypatch/applypatch.h"
-
 #include "flashutils/flashutils.h"
+#include "../roots.h"
+#include "../mounts.h"
+#include "../safebootcommands.h"
+#include "../extendedcommands.h"
+#include "../common.h"
+
+#define FLASH_NS_FILE "/.flash_non_safe"
 
 #ifdef USE_EXT4
 #include "make_ext4fs.h"
 #endif
+
+int check_systemorig_mount() {
+    int result = 0;
+    result = scan_mounted_volumes();
+    if (result < 0) {
+        return 0;
+    }
+    const MountedVolume* mv = find_mounted_volume_by_mount_point("/systemorig");
+    if (mv == NULL) {
+        system("mount /dev/block/systemorig /systemorig");
+        result = scan_mounted_volumes();
+        if (result < 0) {
+            return 0;
+        }
+        const MountedVolume* mv = find_mounted_volume_by_mount_point("/systemorig");
+        if (mv == NULL) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int get_safe_mode() {
+    int result = 0;
+    if (check_systemorig_mount()) {
+       struct statfs info;
+       if (0 == statfs(SAFE_SYSTEM_FILE, &info))
+           result = 1;
+    }
+    system("umount /systemorig");
+    return result;
+}
+
+int
+allow_flash_non_safe()
+{
+    FILE* fnsfd;
+    int chars;
+    int closed;
+    struct statfs fns_info;
+    int flash_non_safe = 0;
+    
+    if (!(statfs(FLASH_NS_FILE, &fns_info)))
+    {
+    	fnsfd = fopen(FLASH_NS_FILE, "r");
+	char *charsin = calloc(2,sizeof(char));
+	fgets(charsin,2,fnsfd);
+	flash_non_safe = atoi(charsin);	
+	closed = fclose(fnsfd);
+    }    
+    return flash_non_safe;
+}
+
+int safe_mode;
 
 // mount(fs_type, partition_type, location, mount_point)
 //
@@ -55,6 +124,8 @@ Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* partition_type;
     char* location;
     char* mount_point;
+    safe_mode = get_safe_mode();
+ 
     if (ReadArgs(state, argv, 4, &fs_type, &partition_type,
                  &location, &mount_point) < 0) {
         return NULL;
@@ -73,15 +144,22 @@ Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
         ErrorAbort(state, "location argument to %s() can't be empty", name);
         goto done;
     }
-    if (strcmp(location,BOARD_NONSAFE_SYSTEM_DEVICE) == 0) {
+    if (!(strcmp(location,BOARD_NONSAFE_SYSTEM_DEVICE)) && !(allow_flash_non_safe())) {
         /* dynamically change system block device mount to /dev/block/system alias */
         location = strdup("/dev/block/system");
     }
-    if (strlen(mount_point) == 0) {
+    if (!strlen(mount_point)) {
         ErrorAbort(state, "mount_point argument to %s() can't be empty", name);
         goto done;
     }
-
+    // if we're in non-safe mode but have enabled flashing, and the script
+    // wants to alter /system, then:
+    // 1: attempt to backup safestrap files to the internal sdcard
+    // 2: swap it to /systemorig
+    else if (!(safe_mode) && !(strcmp(mount_point,"/system")) && (allow_flash_non_safe()))
+    {
+	mount_point = strdup("/systemorig");
+    }
     mkdir(mount_point, 0755);
 
     if (strcmp(partition_type, "MTD") == 0) {
@@ -135,7 +213,12 @@ Value* IsMountedFn(const char* name, State* state, int argc, Expr* argv[]) {
         ErrorAbort(state, "mount_point argument to unmount() can't be empty");
         goto done;
     }
-
+    // if in non-safe mode, non-safe flashing is allowed and we want to check
+    // if /system is mounted, then make sure we're checking /systemorig
+    else if ( (!(safe_mode) ) && (!(strcmp(mount_point,"/system"))) && (allow_flash_non_safe()) )
+    {
+	mount_point = strdup("/systemorig");
+    }
     scan_mounted_volumes();
     const MountedVolume* vol = find_mounted_volume_by_mount_point(mount_point);
     if (vol == NULL) {
@@ -163,7 +246,11 @@ Value* UnmountFn(const char* name, State* state, int argc, Expr* argv[]) {
         ErrorAbort(state, "mount_point argument to unmount() can't be empty");
         goto done;
     }
-
+    // make sure we unmount /systemorig if in non-safe mode
+    else if ( (!(safe_mode) ) && (!(strcmp(mount_point,"/system"))) && (allow_flash_non_safe()) )
+    {
+	mount_point = strdup("/systemorig");
+    }
     scan_mounted_volumes();
     const MountedVolume* vol = find_mounted_volume_by_mount_point(mount_point);
     if (vol == NULL) {
@@ -209,7 +296,7 @@ Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
         ErrorAbort(state, "location argument to %s() can't be empty", name);
         goto done;
     }
-    if (strcmp(location,BOARD_NONSAFE_SYSTEM_DEVICE) == 0) {
+    if ( (strcmp(location,BOARD_NONSAFE_SYSTEM_DEVICE) == 0) && !(allow_flash_non_safe())) {
         /* dynamically change system block device mount to /dev/block/system alias */
         location = strdup("/dev/block/system");
     }
@@ -287,33 +374,93 @@ done:
 Value* DeleteFn(const char* name, State* state, int argc, Expr* argv[]) {
     char** paths = malloc(argc * sizeof(char*));
     int i;
+    int paths_count;
+    int success = 0;
+    char paths_copy[argc][PATH_MAX];
     for (i = 0; i < argc; ++i) {
-        paths[i] = Evaluate(state, argv[i]);
-        if (paths[i] == NULL) {
-            int j;
-            for (j = 0; j < i; ++i) {
-                free(paths[j]);
-            }
-            free(paths);
-            return NULL;
+	    paths[i] = Evaluate(state, argv[i]);
+	    if (paths[i] == NULL) {
+		int j;
+		for (j = 0; j < i; ++i) {
+		    free(paths[j]);
+		}
+		free(paths);
+		return NULL;
+	    }
+    }
+
+    switch(safe_mode)
+    {
+	case 0:
+	{
+	    bool recursive = (strcmp(name, "delete_recursive") == 0);
+		
+	    for (paths_count=0; paths_count < argc; ++paths_count)
+	    {
+		if ( !(strncmp(paths[paths_count],"/system",7)) )
+		{
+		    strcpy(paths_copy[paths_count],paths[paths_count]);
+		    if(strlen(paths_copy[paths_count]))
+		    {
+			if(!strcmp(paths_copy[paths_count],"/system"))
+			{
+			    int length=strlen(paths[paths_count])+1;
+			    memmove(&paths_copy[paths_count][11], &paths_copy[paths_count][7],((length*sizeof(char))-7));
+			    paths_copy[paths_count][7] = 'o';
+			    paths_copy[paths_count][8] = 'r';
+			    paths_copy[paths_count][9] = 'i';
+			    paths_copy[paths_count][10] = 'g';
+			    paths_copy[paths_count][(strlen(paths_copy[paths_count]))] = '\0';
+			}
+		    }
+		}
+	    }
+
+	    for (i = 0; i < argc; ++i) 
+	    {
+	        if ((recursive ? dirUnlinkHierarchy(paths_copy[i]) : unlink(paths_copy[i])) == 0)
+	        {
+		    ++success;
+	        }
+	        free(paths[i]);
+	    }
+	break;
+	}
+	case 1:
+    	{
+	    for (i = 0; i < argc; ++i) 
+	    {
+		paths[i] = Evaluate(state, argv[i]);
+		if (paths[i] == NULL) {
+		    int j;
+		    for (j = 0; j < i; ++i) {
+			free(paths[j]);
+		    }
+		    free(paths);
+		    return NULL;
+		}
+	    }
+
+	    bool recursive = (strcmp(name, "delete_recursive") == 0);
+
+	    for (i = 0; i < argc; ++i) 
+	    {
+	        if ((recursive ? dirUnlinkHierarchy(paths[i]) : unlink(paths[i])) == 0)
+	        {
+		    ++success;
+	        }
+	        free(paths[i]);
+	    }
+	break;
         }
     }
-
-    bool recursive = (strcmp(name, "delete_recursive") == 0);
-
-    int success = 0;
-    for (i = 0; i < argc; ++i) {
-        if ((recursive ? dirUnlinkHierarchy(paths[i]) : unlink(paths[i])) == 0)
-            ++success;
-        free(paths[i]);
-    }
+    
     free(paths);
 
     char buffer[10];
     sprintf(buffer, "%d", success);
     return StringValue(strdup(buffer));
 }
-
 
 Value* ShowProgressFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (argc != 2) {
@@ -360,21 +507,50 @@ Value* PackageExtractDirFn(const char* name, State* state,
     }
     char* zip_path;
     char* dest_path;
+    char dest_copy[64];
     if (ReadArgs(state, argv, 2, &zip_path, &dest_path) < 0) return NULL;
 
+    if (strlen(dest_path) == 0) 
+    {
+        return ErrorAbort(state, "dest_path argument to %s() can't be empty", name);
+    }
+    else if ( !(safe_mode ) && !(strcmp(dest_path,"/system")) && allow_flash_non_safe())
+    {
+     	strcpy(dest_copy, dest_path);
+	if(strlen(dest_copy))
+	{
+	    if(!strcmp(dest_copy,"/system"))
+	    {
+		int tlength=strlen(dest_path)+1;
+		memmove(&dest_copy[11], &dest_copy[7],((tlength*sizeof(char))-7));
+		dest_copy[7] = 'o';
+		dest_copy[8] = 'r';
+		dest_copy[9] = 'i';
+		dest_copy[10] = 'g';
+		dest_copy[(strlen(dest_copy))] = '\0';
+	    }
+	}
+	//dest_path = strdup(dest_copy);
+	//fprintf(stderr,"\nPackageExtractDirFn: dest_path=\"%s\"\n", dest_path);
+    }
+    
     ZipArchive* za = ((UpdaterInfo*)(state->cookie))->package_zip;
 
     // To create a consistent system image, never use the clock for timestamps.
     struct utimbuf timestamp = { 1217592000, 1217592000 };  // 8/1/2008 default
-
-    bool success = mzExtractRecursive(za, zip_path, dest_path,
-                                      MZ_EXTRACT_FILES_ONLY, &timestamp,
-                                      NULL, NULL);
+    bool success;
+    if((safe_mode))
+    {
+        success = mzExtractRecursive(za, zip_path, dest_path, MZ_EXTRACT_FILES_ONLY, &timestamp, NULL, NULL);
+    }
+    else
+    {
+        success = mzExtractRecursive(za, zip_path, dest_copy, MZ_EXTRACT_FILES_ONLY, &timestamp, NULL, NULL);
+    }
     free(zip_path);
     free(dest_path);
     return StringValue(strdup(success ? "t" : ""));
 }
-
 
 // package_extract_file(package_path, destination_path)
 //   or
@@ -383,6 +559,7 @@ Value* PackageExtractDirFn(const char* name, State* state,
 //   function (the char* returned is actually a FileContents*).
 Value* PackageExtractFileFn(const char* name, State* state,
                            int argc, Expr* argv[]) {
+    char dest_copy[64];
     if (argc != 1 && argc != 2) {
         return ErrorAbort(state, "%s() expects 1 or 2 args, got %d",
                           name, argc);
@@ -393,7 +570,29 @@ Value* PackageExtractFileFn(const char* name, State* state,
 
         char* zip_path;
         char* dest_path;
-        if (ReadArgs(state, argv, 2, &zip_path, &dest_path) < 0) return NULL;
+	if (ReadArgs(state, argv, 2, &zip_path, &dest_path) < 0) return NULL;
+
+	if (strlen(dest_path) == 0) 
+    	{
+            return ErrorAbort(state, "dest_path argument to %s() can't be empty", name);
+    	}
+    	else if ( !(safe_mode ) && !(strcmp(dest_path,"/system")) && allow_flash_non_safe())
+    	{
+     	    strcpy(dest_copy, dest_path);
+	    if(strlen(dest_copy))
+	    {
+	    	if(!strncmp(dest_copy,"/system",(sizeof(char)*7)))
+	        {
+		    int tlength=strlen(dest_path)+1;
+		    memmove(&dest_copy[11], &dest_copy[7],((tlength*sizeof(char))-7));
+		    dest_copy[7] = 'o';
+		    dest_copy[8] = 'r';
+		    dest_copy[9] = 'i';
+		    dest_copy[10] = 'g';
+		    dest_copy[(strlen(dest_copy))] = '\0';
+	        }
+	    }
+        }
 
         ZipArchive* za = ((UpdaterInfo*)(state->cookie))->package_zip;
         const ZipEntry* entry = mzFindZipEntry(za, zip_path);
@@ -401,13 +600,25 @@ Value* PackageExtractFileFn(const char* name, State* state,
             fprintf(stderr, "%s: no %s in package\n", name, zip_path);
             goto done2;
         }
-
-        FILE* f = fopen(dest_path, "wb");
-        if (f == NULL) {
-            fprintf(stderr, "%s: can't open %s for write: %s\n",
-                    name, dest_path, strerror(errno));
-            goto done2;
+	FILE* f = NULL;
+        if((safe_mode))
+	{
+	    f = fopen(dest_path, "wb");
+	    if (f == NULL) {
+		fprintf(stderr, "%s: can't open %s for write: %s\n",
+			name, dest_path, strerror(errno));
+		goto done2;
+	    }
         }
+	else
+	{
+    	    f = fopen(dest_copy, "wb");
+	    if (f == NULL) {
+		fprintf(stderr, "%s: can't open %s for write: %s\n",
+			name, dest_copy, strerror(errno));
+		goto done2;
+	    }
+	}
         success = mzExtractZipEntryToFile(za, entry, fileno(f));
         fclose(f);
 
@@ -456,7 +667,6 @@ Value* PackageExtractFileFn(const char* name, State* state,
     }
 }
 
-
 // symlink target src1 src2 ...
 //    unlinks any previously existing src1, src2, etc before creating symlinks.
 Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
@@ -464,38 +674,104 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
         return ErrorAbort(state, "%s() expects 1+ args, got %d", name, argc);
     }
     char* target;
+    char target_copy[64];
     target = Evaluate(state, argv[0]);
     if (target == NULL) return NULL;
-
+    
     char** srcs = ReadVarArgs(state, argc-1, argv+1);
     if (srcs == NULL) {
         free(target);
         return NULL;
     }
+    
+    int srcs_count;
+    char srcs_copy[argc-1][64];
 
-    int i;
-    for (i = 0; i < argc-1; ++i) {
-        if (unlink(srcs[i]) < 0) {
-            if (errno != ENOENT) {
-                fprintf(stderr, "%s: failed to remove %s: %s\n",
-                        name, srcs[i], strerror(errno));
-            }
+    switch (safe_mode)
+    {
+	case 0:
+	{
+	    strcpy(target_copy, target);
+	    if(strlen(target_copy))
+	    {
+        if(!strncmp(target_copy,"/system",(sizeof(char)*7)))
+		{
+		    int tlength=strlen(target)+1;
+		    memmove(&target_copy[2], &target_copy[7],((tlength*sizeof(char))-7));
+		    target_copy[0] = '.';
+		    target_copy[1] = '.';
+		    //target_copy[9] = 'i';
+		    //target_copy[10] = 'g';
+		    //target_copy[(strlen(target_copy))] = '\0';
+		}
+	    }
+	    
+	    for (srcs_count = 0; srcs_count < argc-1; ++srcs_count)
+	    {
+		strcpy(srcs_copy[srcs_count],srcs[srcs_count]);
+		if(strlen(srcs_copy[srcs_count]))
+		{
+		    if(!strncmp(srcs_copy[srcs_count],"/system",(sizeof(char)*7)))
+		    {
+			int length=strlen(srcs[srcs_count])+1;
+			memmove(&srcs_copy[srcs_count][11], &srcs_copy[srcs_count][7],((length*sizeof(char))-7));
+			srcs_copy[srcs_count][7] = 'o';
+			srcs_copy[srcs_count][8] = 'r';
+			srcs_copy[srcs_count][9] = 'i';
+			srcs_copy[srcs_count][10] = 'g';
+			srcs_copy[srcs_count][(strlen(srcs_copy[srcs_count]))] = '\0';
+		    }
+		}
+	    }
+	    int i;
+	    for (i = 0; i < argc-1; ++i)
+	    {
+		if (unlink(srcs_copy[i]) < 0) 
+		{
+		    if (errno != ENOENT)
+		    {
+			fprintf(stderr, "%s: failed to remove %s: %s\n", name, srcs_copy[i], strerror(errno));
+		    }
+		}
+		if (symlink(target_copy, srcs_copy[i]) < 0)
+		{
+		    fprintf(stderr, "%s: failed to symlink %s to %s: %s\n", name, srcs_copy[i], target_copy, strerror(errno));
+		}
+	        free(srcs[i]);
+	    }
+	break;
         }
-        if (symlink(target, srcs[i]) < 0) {
-            fprintf(stderr, "%s: failed to symlink %s to %s: %s\n",
-                    name, srcs[i], target, strerror(errno));
-        }
-        free(srcs[i]);
+
+	case 1:
+	{
+	    int i;
+	    for (i = 0; i < argc-1; ++i)
+	    {
+		if (unlink(srcs[i]) < 0)
+		{
+		    if (errno != ENOENT)
+		    {
+			fprintf(stderr, "%s: failed to remove %s: %s\n", name, srcs[i], strerror(errno));
+		    }
+		}
+		if (symlink(target, srcs[i]) < 0)
+		{
+		    fprintf(stderr, "%s: failed to symlink %s to %s: %s\n", name, srcs[i], target, strerror(errno));
+		}
+	        free(srcs[i]);
+	    }
+    	break;
+	}
     }
+
     free(srcs);
     return StringValue(strdup(""));
 }
 
-
 Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
     bool recursive = (strcmp(name, "set_perm_recursive") == 0);
-
+    
     int min_args = 4 + (recursive ? 1 : 0);
     if (argc < min_args) {
         return ErrorAbort(state, "%s() expects %d+ args, got %d", name, argc);
@@ -505,8 +781,9 @@ Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (args == NULL) return NULL;
 
     char* end;
+    char args_copy[argc][64];
     int i;
-
+    
     int uid = strtoul(args[0], &end, 0);
     if (*end != '\0' || args[0][0] == 0) {
         ErrorAbort(state, "%s: \"%s\" not a valid uid", name, args[0]);
@@ -519,7 +796,8 @@ Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
         goto done;
     }
 
-    if (recursive) {
+    if (recursive)
+    {
         int dir_mode = strtoul(args[2], &end, 0);
         if (*end != '\0' || args[2][0] == 0) {
             ErrorAbort(state, "%s: \"%s\" not a valid dirmode", name, args[2]);
@@ -533,26 +811,102 @@ Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
             goto done;
         }
 
-        for (i = 4; i < argc; ++i) {
-            dirSetHierarchyPermissions(args[i], uid, gid, dir_mode, file_mode);
-        }
-    } else {
+        
+	switch (safe_mode)
+	{
+	    case 0:
+	    {
+		for (i = 4; i < argc; ++i)
+		{
+		    strcpy(args_copy[i], args[i]);
+		    if(strlen(args_copy[i]))
+		    {
+			if(!strncmp(args_copy[i],"/system",(7*sizeof(char))))
+			{
+			    int alength=strlen(args[i])+1;
+			    memmove(&args_copy[i][11], &args_copy[i][7],((alength*sizeof(char))-7));
+			    args_copy[i][7] = 'o';
+			    args_copy[i][8] = 'r';
+			    args_copy[i][9] = 'i';
+			    args_copy[i][10] = 'g';
+			    args_copy[i][(strlen(args_copy[i]))] = '\0';
+			}
+		    }
+		    dirSetHierarchyPermissions(args_copy[i], uid, gid, dir_mode, file_mode);
+		}
+	    break;
+	    }
+	
+	    case 1:
+	    {
+		for (i = 4; i < argc; ++i)
+		{
+		    dirSetHierarchyPermissions(args[i], uid, gid, dir_mode, file_mode);
+		}
+
+	    break;
+	    }
+
+	}
+	
+    } 
+    else
+    {
         int mode = strtoul(args[2], &end, 0);
-        if (*end != '\0' || args[2][0] == 0) {
+        if (*end != '\0' || args[2][0] == 0) 
+	{
             ErrorAbort(state, "%s: \"%s\" not a valid mode", name, args[2]);
             goto done;
         }
+	
+	switch (safe_mode)
+	{
+	    case 0:
+	    {
+		for (i = 3; i < argc; ++i) 
+		{
+		    char args_copy[argc][64];
+		    strcpy(args_copy[i], args[i]);
+		    if(!strncmp(args_copy[i],"/system",(sizeof(char)*7)))
+		    {
+			int alength=strlen(args[i])+1;
+			memmove(&args_copy[i][11], &args_copy[i][7],((alength*sizeof(char))-7));
+			args_copy[i][7] = 'o';
+			args_copy[i][8] = 'r';
+			args_copy[i][9] = 'i';
+			args_copy[i][10] = 'g';
+			args_copy[i][(strlen(args_copy[i]))] = '\0';
+		    }
+		    if (chown(args_copy[i], uid, gid) < 0) 
+		    {
+			fprintf(stderr, "%s: chown of %s to %d %d failed: %s\n", name, args_copy[i], uid, gid, strerror(errno));
+		    }
 
-        for (i = 3; i < argc; ++i) {
-            if (chown(args[i], uid, gid) < 0) {
-                fprintf(stderr, "%s: chown of %s to %d %d failed: %s\n",
-                        name, args[i], uid, gid, strerror(errno));
-            }
-            if (chmod(args[i], mode) < 0) {
-                fprintf(stderr, "%s: chmod of %s to %o failed: %s\n",
-                        name, args[i], mode, strerror(errno));
-            }
-        }
+		    if (chmod(args_copy[i], mode) < 0) 
+		    {
+			fprintf(stderr, "%s: chmod of %s to %o failed: %s\n", name, args_copy[i], mode, strerror(errno));
+		    }
+		}
+	    break;
+	    }
+	    case 1:
+	    {
+		for (i = 3; i < argc; ++i) 
+		{
+		    if (chown(args[i], uid, gid) < 0) 
+		    {
+			fprintf(stderr, "%s: chown of %s to %d %d failed: %s\n",
+				name, args[i], uid, gid, strerror(errno));
+		    }
+		    if (chmod(args[i], mode) < 0) 
+		    {
+			fprintf(stderr, "%s: chmod of %s to %o failed: %s\n",
+				name, args[i], mode, strerror(errno));
+		    }
+		}
+	    break;
+	    }
+	}
     }
     result = strdup("");
 
@@ -564,7 +918,6 @@ done:
 
     return StringValue(result);
 }
-
 
 Value* GetPropFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (argc != 1) {
@@ -692,7 +1045,6 @@ static bool write_raw_image_cb(const unsigned char* data,
 // write_raw_image(file, partition)
 Value* WriteRawImageFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
-
     char* partition;
     char* filename;
     if (ReadArgs(state, argv, 2, &filename, &partition) < 0) {
@@ -706,6 +1058,13 @@ Value* WriteRawImageFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (strlen(filename) == 0) {
         ErrorAbort(state, "file argument to %s can't be empty", name);
         goto done;
+    }
+    if (strlen(partition))
+    {
+	if ( (!(safe_mode)) && (!strncmp(partition,"/system",(7*sizeof(char)))) && allow_flash_non_safe() )
+        {
+	    partition = strdup("/systemorig");
+        }
     }
 
     if (0 == restore_raw_partition(NULL, partition, filename))

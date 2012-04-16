@@ -113,8 +113,8 @@ void show_safe_boot_menu() {
 				 NULL
     };
     headers = prepend_title((const char**)headers_before);
-    static char* list[] = { "| <1> toggle safe system                          |/|",
-			    "| <2> quick toggle safe system (DANGEROUS)        |/|",
+    static char* list[] = { "|| <1> toggle safe system                         |/|",
+			    "|| <2> quick toggle safe system (DANGEROUS)       |/|",
 			    NULL
     };
 
@@ -135,7 +135,7 @@ void show_safe_boot_menu() {
 				           };
 
 	    char confirm_tog[MENU_HEADER_COLS];
-	    sprintf(confirm_tog,  "[ <8> yes - %s safe system                   |/|", !safemode ? " enable" : "disable");
+	    sprintf(confirm_tog,  "|| <8> yes - %s safe system                  |/|", !safemode ? " enable" : "disable");
  	    if (confirm_selection(confirm_toggle, confirm_tog)) toggle_safe_mode();
 	    break;
         }
@@ -149,7 +149,7 @@ void show_safe_boot_menu() {
 					    };
 
 	    char confirm_qtog[MENU_HEADER_COLS];
-	    sprintf(confirm_qtog, "| <8> yes - %s safe system (DANGEROUS)       |/|", !safemode ? " enable" : "disable");
+	    sprintf(confirm_qtog, "|| <8> yes - %s safe system (DANGEROUS)      |/|", !safemode ? " enable" : "disable");
 	    if (confirm_selection(confirm_qtoggle, confirm_qtog)) quick_toggle_safe_mode();
 	    break;
         }
@@ -203,93 +203,98 @@ void toggle_safe_mode() {
     if (sdcard_free_mb < 1024)
         ui_print("there may not be enough free space to complete backup... continuing...\n");
 
-    ui_set_background(BACKGROUND_ICON_INSTALLING);
-    ui_show_indeterminate_progress();
+    //ui_set_background(BACKGROUND_ICON_INSTALLING);
+    //ui_show_indeterminate_progress();
     if (!safemode) {
    
         sprintf(cmd, "mkdir -p %s", orig_backup_path);
         __system(cmd);
+	
+	ui_show_progress(0.22,46);	
 
         /* 1. make a backup of the existing /data + /cache in /emmc/safestrap/orig/ */
         ui_print("\n-- backing up original data...\n");
 
         sprintf(cmd, "rm %s/*", orig_backup_path);
         __system(cmd);
-        if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/system"))) return;
-        ui_set_progress(0.15);
+        //if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/system"))) return;
+        //ui_set_progress(0.15);
         if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/data"))) return;
-        ui_set_progress(0.40);
-        if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/cache"))) return;
-        ui_set_progress(0.45);
+        //if (0 != (ret = nandroid_backup_partition(orig_backup_path, "/cache"))) return;
+        //ui_set_progress(0.45);
 
         ui_print("\n-- restoring safe system data...\n");
+	ui_show_progress(0.75, 154);
 
-        if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/system"))) return;
-        ui_set_progress(0.60);
+        //if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/system"))) return;
+        //ui_set_progress(0.60);
         if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/data"))) return;
-        ui_set_progress(0.80);
-        if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/cache"))) return;
-        ui_set_progress(0.90);
+        //ui_set_progress(0.80);
+        //if (0 != (ret = nandroid_restore_partition(safe_backup_path, "/cache"))) return;
+        //ui_set_progress(0.90);
+	
+	ui_show_progress(0.03, 5);
 
         /* 3. wipe Dalvik Cache */
         __system("rm -r /data/dalvik-cache");
         __system("rm -r /cache/dalvik-cache");
-        __system("rm -r /sd-ext/dalvik-cache");
-        ui_set_progress(0.95);
+        //__system("rm -r /sd-ext/dalvik-cache");
+        //ui_set_progress(0.95);
 
         /* 4. touch SAFE_SYSTEM_FILE */
         sprintf(cmd, "touch %s", SAFE_SYSTEM_FILE);
         ui_print("\n%s\n", cmd);
         __system(cmd);
 
-        ui_set_progress(1);
-        ui_print("swap to safe system complete.\n");
+	ui_print("swap to safe system complete.\n");
 
     } else {
 
         sprintf(cmd, "mkdir -p %s", safe_backup_path);
         __system(cmd);
 
-        /* 1. make a backup of the existing /data + /cache in /emmc/safestrap/safe/ */
+	ui_show_progress(0.22,46);	
+
+	/* 1. make a backup of the existing /data + /cache in /emmc/safestrap/safe/ */
         ui_print("\n-- backing up safe system...\n");
 
         sprintf(cmd, "rm %s/*", safe_backup_path);
         __system(cmd);
-        if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/system"))) return;
-        ui_set_progress(0.15);
+        //if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/system"))) return;
+        //ui_set_progress(0.15);
         if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/data"))) return;
-        ui_set_progress(0.40);
-        if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/cache"))) return;
-        ui_set_progress(0.45);
+        //if (0 != (ret = nandroid_backup_partition(safe_backup_path, "/cache"))) return;
+        //ui_set_progress(0.45);
 
         ui_print("\n-- restoring original system...\n");
+	ui_show_progress(0.75, 154);
 
-        if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/system"))) return;
-        ui_set_progress(0.60);
+        //if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/system"))) return;
+        //ui_set_progress(0.60);
         if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/data"))) return;
-        ui_set_progress(0.80);
-        if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/cache"))) return;
-        ui_set_progress(0.90);
+	
+	ui_show_progress(0.03, 5);
+        
+	//if (0 != (ret = nandroid_restore_partition(orig_backup_path, "/cache"))) return;
+        //ui_set_progress(0.90);
 
         /* 3. wipe Dalvik Cache */
         __system("rm -r /data/dalvik-cache");
         __system("rm -r /cache/dalvik-cache");
-        __system("rm -r /sd-ext/dalvik-cache");
-        ui_set_progress(0.95);
+        //__system("rm -r /sd-ext/dalvik-cache");
 
         /* 4. rm SAFE_SYSTEM_FILE */
         sprintf(cmd, "rm %s", SAFE_SYSTEM_FILE);
         ui_print("\n%s\n", cmd);
         __system(cmd);
 
-        ui_set_progress(1);
-        ui_print("swap to original system complete.\n");
+	ui_print("swap to original system complete.\n");
     }
     sync();
     ui_set_background(BACKGROUND_ICON_CLOCKWORK);
-    ui_reset_progress();
 
     safemode = get_safe_mode();
     ui_print("safe system is now: %s \n", safemode ? "ENABLED" : "DISABLED");
+    ui_reset_progress();
 }
 

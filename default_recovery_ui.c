@@ -26,62 +26,54 @@ char* MENU_HEADERS[] = { "||    main menu     |/____________________________,/|"
 		       };
 
 
-char* MENU_ITEMS_SAFE[] = {     "| <1> safe system menu                            |/|",
-				"| <2> reboot                                      |/|",
-				"| <3> power off                                   |/|",
-				"| <4> wipe all user data (factory reset)          |/|",
-				"| <5> wipe cache                                  |/|",
-				"| <6> nandroid menu (backup and restore)          |/|",
-				"| <7> mounts and USB storage                      |/|",
-				"| <8> advanced and debugging menu                 |/|",
-				"| <9> console                                     |/|",
-				"| <0> update/patch menu                           |/|",
+char* MENU_ITEMS_SAFE[] = {     "|| <1> safe-boot menu                             |/|",
+				"|| <2> reboot / power off                         |/|",
+				"|| <3> wipe menu                                  |/|",
+				"|| <4> nandroid menu (backup and restore)         |/|",
+				"|| <5> mounts and USB storage                     |/|",
+				"|| <6> advanced and debugging menu                |/|",
+				"|| <7> console menu                               |/|",
+				"|| <8> update/patch menu                          |/|",
                                 NULL };
 
- char* MENU_ITEMS[] =      {    "| <1> safe system menu                            |/|",
-				"| <2> reboot                                      |/|",
-				"| <3> power off                                   |/|",
-				"| <4> wipe all user data (factory reset)          |/|",
-				"| <5> wipe cache                                  |/|",
-				"| <6> nandroid menu (backup and restore)          |/|",
-				"| <7> mounts and USB storage                      |/|",
-				"| <8> advanced and debugging menu                 |/|",
-				"| <9> console                                     |/|",
+ char* MENU_ITEMS[] =      {    "|| <1> safe-boot menu                             |/|",
+				"|| <2> reboot / power off                         |/|",
+				"|| <3> wipe menu                                  |/|",
+				"|| <4> nandroid menu (backup and restore)         |/|",
+				"|| <5> mounts and USB storage                     |/|",
+				"|| <6> advanced and debugging menu                |/|",
+				"|| <7> console menu                               |/|",
                                 NULL };
 
- char* ADV_MENU_ITEMS_SAFE[] = {"| <1> show log                                    |/|",
-				"| <2> reboot                                      |/|",
-				"| <3> wipe dalvik cache                           |/|",
-				"| <4> wipe battery statistics                     |/|",
-				"| <5> dump log for error reporting                |/|",
-				"| <6> key event test                              |/|",
-				"| <7> fix permissions                             |/|",
+ char* ADV_MENU_ITEMS_SAFE[] = {"|| <1> show log                                   |/|",
+				"|| <2> dump log for error reporting               |/|",
+				"|| <3> key event test                             |/|",
+				"|| <4> wipe battery statistics                    |/|",
+				"|| <5> fix permissions                            |/|",
 #ifndef BOARD_HAS_SMALL_RECOVERY
-                           	"| <8> partition external SD card                  |/|",
+                           	"|| <6> partition external SD card                 |/|",
 #ifdef BOARD_HAS_SDCARD_INTERNAL
 #ifndef BOARD_HAS_INTERNAL_PARTITIONS
-                           	"| <9> partition internal SD card                  |/|",
+                           	"|| <7> partition internal SD card                 |/|",
 #endif
 #endif
 #endif
 			   	NULL };
  
- char* ADV_MENU_ITEMS[] = {     "| <1> show log                                    |/|",
-				"| <2> reboot                                      |/|",
-				"| <3> wipe dalvik cache                           |/|",
-				"| <4> wipe battery statistics                     |/|",
-				"| <5> dump log for error reporting                |/|",
-				"| <6> key event test                              |/|",
-				"| <7> fix permissions                             |/|",
+ char* ADV_MENU_ITEMS[] = {     "|| <1> show log                                   |/|",
+				"|| <2> dump log for error reporting               |/|",
+				"|| <3> key event test                             |/|",
+				"|| <4> wipe battery statistics                    |/|",
+				"|| <5> fix permissions                            |/|",
 #ifndef BOARD_HAS_SMALL_RECOVERY
-                           	"| <8> partition external SD card                  |/|",
+                           	"|| <6> partition external SD card                 |/|",
 #ifdef BOARD_HAS_SDCARD_INTERNAL
 #ifndef BOARD_HAS_INTERNAL_PARTITIONS
-                           	"| <9> partition internal SD card                  |/|",
+                           	"|| <7> partition internal SD card                 |/|",
 #endif
 #endif
 #endif
-				"| <0> update/patch non-safe system (DANGEROUS)    |/|",
+				"|| <8> update/patch non-safe system (DANGEROUS)   |/|",
                            	NULL };
 
 int device_recovery_start() {
