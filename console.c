@@ -808,7 +808,7 @@ int run_console(const char* command)
 	{
 	    char tmp_backup_cmd[PATH_MAX];
 	    ensure_path_mounted("/emmc");
-	    sprintf(tmp_backup_cmd,"/sbin/busybox tar xzf %s .safestrap/home/.bash_aliases .safestrap/home/.bashrc .safestrap/home/.history .safestrap/home/.bash_history .safestrap/home/.prefs .safestrap/home/.vimrc .safestrap/home/.viminfo .safestrap/home/.terminfo .safestrap/home/.profile -C /cache",SS_HOMEFILES);
+	    sprintf(tmp_backup_cmd,"/sbin/busybox tar xzf %s -C /cache",SS_HOMEFILES);
 	    __system(tmp_backup_cmd);
 	}
 

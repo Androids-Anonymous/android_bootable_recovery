@@ -347,10 +347,10 @@ format_ext3_device (const char *device) {
     char *const mke2fs[] = {MKE2FS_BIN, "-j", device, NULL};
     char *const tune2fs[] = {TUNE2FS_BIN, "-j", "-C", "1", device, NULL};
 #endif
-    if(!(strcmp(device,"/cache"))) {
+   /* if(!(strcmp(device,"/cache"))) {
 	printf("skipping format of /cache\n");
 	return 0;
-    }
+    } */
     
     // Run mke2fs
     if(run_exec_process(mke2fs)) {

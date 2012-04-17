@@ -255,8 +255,8 @@ int show_reboot_menu() {
     headers = prepend_title((const char**)headers_reb);
 
     static char* list[] = {  "|| <1> reboot                                     |/|",
-                             "|| <2> reboot recovery                            |/|",
-                             "|| <3> power off                                  |/|",
+                            // "|| <2> reboot recovery                            |/|",
+                             "|| <2> power off                                  |/|",
 			     NULL
     };
     
@@ -273,15 +273,15 @@ int show_reboot_menu() {
 		return poweroff;
             }
 	    
-	    case 1:
+	   /* case 1:
 	    {
 		reboot_wrapper("recovery");
 		// in case rebooting to recovery fails
 		poweroff = REBOOT_NOW;
 		return poweroff;
-	    }
+	    } */
         
-	    case 2:
+	    case 1:
 	    {
 		poweroff = SHUTDOWN_NOW;
 		return poweroff;
@@ -342,6 +342,7 @@ show_wipe_menu() {
                 {
                     ui_print("\n-- wiping cache...\n");
                     erase_volume("/cache");
+		    __system("echo 1 > /.color_change");
                     ui_print("cache wipe complete.\n");
 		}
 		break;
@@ -365,6 +366,7 @@ show_wipe_menu() {
 		    __system("rm -r /data/dalvik-cache");
 		    __system("rm -r /cache/dalvik-cache");
 	            //__system("rm -r /sd-ext/dalvik-cache");
+		    __system("echo 1 > /.color_change");
 		    ui_print("\ndalvik cache wiped.\n");
 		    ensure_path_unmounted("/data");
 		}
@@ -381,6 +383,7 @@ show_wipe_menu() {
 		{
 		    ui_print("\nwiping data...\n");
 		    erase_volume("/data");
+		    __system("echo 1 > /.color_change");
 		    ui_print("\ndata wipe complete.\n");
 		    ensure_path_unmounted("/data");
 		}
@@ -403,6 +406,7 @@ show_wipe_menu() {
 		    
 		    //erase_volume("/sd-ext");
 		    erase_volume("/sdcard/.android_secure");
+		    __system("echo 1 > /.color_change");
 		    ui_print("\ndata wipe complete.\n");
 		}break;
 	    }
@@ -929,7 +933,7 @@ void show_mount_usb_storage_menu()
     {
         int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
         if (chosen_item == GO_BACK || chosen_item == 0)
-            return;
+            break;
     }
 
     if ((fd = open(BOARD_UMS_LUNFILE, O_WRONLY)) < 0) {
