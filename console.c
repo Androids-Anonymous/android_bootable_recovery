@@ -77,6 +77,7 @@
 
 #define BASH_RC_FILE		"/cache/.safestrap/home/.bashrc"
 #define SS_HOME_DIR 		"/cache/.safestrap/home"
+#define SS_HOMEFILES	        "/emmc/safestrap/.ss_homefiles.tar.gz"
 
 typedef struct
 {
@@ -805,9 +806,10 @@ int run_console(const char* command)
   	struct stat statbuffer;   
   	if(statfs(BASH_RC_FILE, &statbuffer))
 	{
+	    char tmp_backup_cmd[PATH_MAX];
 	    ensure_path_mounted("/emmc");
-	    __system("/sbin/busybox tar xf /emmc/safestrap/.ss_homefiles.tar -C /");
-	    ensure_path_unmounted("/emmc");
+	    sprintf(tmp_backup_cmd,"/sbin/busybox tar xzf %s .safestrap/home/.bash_aliases .safestrap/home/.bashrc .safestrap/home/.history .safestrap/home/.bash_history .safestrap/home/.prefs .safestrap/home/.vimrc .safestrap/home/.viminfo .safestrap/home/.terminfo .safestrap/home/.profile -C /cache",SS_HOMEFILES);
+	    __system(tmp_backup_cmd);
 	}
 
 	int childfd = create_subprocess("/sbin/bash", "--init-file", BASH_RC_FILE, &child);
