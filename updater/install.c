@@ -202,6 +202,7 @@ done:
 // is_mounted(mount_point)
 Value* IsMountedFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
+    safe_mode = get_safe_mode();
     if (argc != 1) {
         return ErrorAbort(state, "%s() expects 1 arg, got %d", name, argc);
     }
@@ -235,6 +236,7 @@ done:
 
 Value* UnmountFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
+    safe_mode = get_safe_mode();
     if (argc != 1) {
         return ErrorAbort(state, "%s() expects 1 arg, got %d", name, argc);
     }
@@ -273,6 +275,7 @@ done:
 //    fs_type="ext4"   partition_type="EMMC"    location=device
 Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
+    safe_mode = get_safe_mode();
     if (argc != 3) {
         return ErrorAbort(state, "%s() expects 3 args, got %d", name, argc);
     }
@@ -373,6 +376,7 @@ done:
 
 Value* DeleteFn(const char* name, State* state, int argc, Expr* argv[]) {
     char** paths = malloc(argc * sizeof(char*));
+    safe_mode = get_safe_mode();
     int i;
     int paths_count;
     int success = 0;
@@ -505,9 +509,10 @@ Value* PackageExtractDirFn(const char* name, State* state,
     if (argc != 2) {
         return ErrorAbort(state, "%s() expects 2 args, got %d", name, argc);
     }
+    safe_mode = get_safe_mode();
     char* zip_path;
     char* dest_path;
-    char dest_copy[64];
+    char dest_copy[PATH_MAX];
     if (ReadArgs(state, argv, 2, &zip_path, &dest_path) < 0) return NULL;
 
     if (strlen(dest_path) == 0) 
@@ -530,9 +535,10 @@ Value* PackageExtractDirFn(const char* name, State* state,
 		dest_copy[(strlen(dest_copy))] = '\0';
 	    }
 	}
-	//dest_path = strdup(dest_copy);
-	//fprintf(stderr,"\nPackageExtractDirFn: dest_path=\"%s\"\n", dest_path);
+	dest_path = strdup(dest_copy);
     }
+
+    fprintf(stderr,"\nPackageExtractDirFn: dest_path=\"%s\"\n", dest_path);
     
     ZipArchive* za = ((UpdaterInfo*)(state->cookie))->package_zip;
 
@@ -559,7 +565,8 @@ Value* PackageExtractDirFn(const char* name, State* state,
 //   function (the char* returned is actually a FileContents*).
 Value* PackageExtractFileFn(const char* name, State* state,
                            int argc, Expr* argv[]) {
-    char dest_copy[64];
+    safe_mode = get_safe_mode();
+    char dest_copy[PATH_MAX];
     if (argc != 1 && argc != 2) {
         return ErrorAbort(state, "%s() expects 1 or 2 args, got %d",
                           name, argc);
@@ -673,8 +680,10 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (argc == 0) {
         return ErrorAbort(state, "%s() expects 1+ args, got %d", name, argc);
     }
+    safe_mode = get_safe_mode();
+    fprintf(stderr,"SymlinkFn: safe_mode is \"%d\"\n",safe_mode);
     char* target;
-    char target_copy[64];
+    char target_copy[PATH_MAX];
     target = Evaluate(state, argv[0]);
     if (target == NULL) return NULL;
     
@@ -685,16 +694,16 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
     }
     
     int srcs_count;
-    char srcs_copy[argc-1][64];
+    char srcs_copy[argc][PATH_MAX];
 
     switch (safe_mode)
     {
 	case 0:
 	{
-	    strcpy(target_copy, target);
+	    /*strcpy(target_copy, target);
 	    if(strlen(target_copy))
 	    {
-        if(!strncmp(target_copy,"/system",(sizeof(char)*7)))
+                if(!strncmp(target_copy,"/system",(sizeof(char)*7)))
 		{
 		    int tlength=strlen(target)+1;
 		    memmove(&target_copy[2], &target_copy[7],((tlength*sizeof(char))-7));
@@ -704,11 +713,11 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
 		    //target_copy[10] = 'g';
 		    //target_copy[(strlen(target_copy))] = '\0';
 		}
-	    }
+	    }*/
 	    
 	    for (srcs_count = 0; srcs_count < argc-1; ++srcs_count)
 	    {
-		strcpy(srcs_copy[srcs_count],srcs[srcs_count]);
+		strncpy(srcs_copy[srcs_count],srcs[srcs_count],strlen(srcs[srcs_count]));
 		if(strlen(srcs_copy[srcs_count]))
 		{
 		    if(!strncmp(srcs_copy[srcs_count],"/system",(sizeof(char)*7)))
@@ -733,9 +742,9 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
 			fprintf(stderr, "%s: failed to remove %s: %s\n", name, srcs_copy[i], strerror(errno));
 		    }
 		}
-		if (symlink(target_copy, srcs_copy[i]) < 0)
+		if (symlink(target, srcs_copy[i]) < 0)
 		{
-		    fprintf(stderr, "%s: failed to symlink %s to %s: %s\n", name, srcs_copy[i], target_copy, strerror(errno));
+		    fprintf(stderr, "%s: failed to symlink %s to %s: %s\n", name, srcs_copy[i], target, strerror(errno));
 		}
 	        free(srcs[i]);
 	    }
@@ -770,6 +779,7 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
 
 Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
+    safe_mode = get_safe_mode();
     bool recursive = (strcmp(name, "set_perm_recursive") == 0);
     
     int min_args = 4 + (recursive ? 1 : 0);
@@ -923,6 +933,7 @@ Value* GetPropFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (argc != 1) {
         return ErrorAbort(state, "%s() expects 1 arg, got %d", name, argc);
     }
+    safe_mode = get_safe_mode();
     char* key;
     key = Evaluate(state, argv[0]);
     if (key == NULL) return NULL;
@@ -1044,6 +1055,7 @@ static bool write_raw_image_cb(const unsigned char* data,
 
 // write_raw_image(file, partition)
 Value* WriteRawImageFn(const char* name, State* state, int argc, Expr* argv[]) {
+    safe_mode = get_safe_mode();
     char* result = NULL;
     char* partition;
     char* filename;
@@ -1238,34 +1250,77 @@ Value* RunProgramFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (args == NULL) {
         return NULL;
     }
-
+    safe_mode = get_safe_mode();
     char** args2 = malloc(sizeof(char*) * (argc+1));
     memcpy(args2, args, sizeof(char*) * argc);
     args2[argc] = NULL;
+    char args2_copy[argc][PATH_MAX];
+    int arg_total = argc;
+    int arg_count;
 
-    fprintf(stderr, "about to run program [%s] with %d args\n", args2[0], argc);
+    for(arg_count = 0; arg_count < arg_total; arg_count++)
+    {
+	
+        
+	if ( !(safe_mode ) && !(strncmp(args2[arg_count],"/system",(7*sizeof(char)))) && strncmp(args2[arg_count],"/systemorig",(11*sizeof(char))) && allow_flash_non_safe())
+	{
+	    strncpy(args2_copy[arg_count],args2[arg_count],strlen(args2[arg_count]));
+	    if(arg_count == 0)
+	    {
+		if(strlen(args2[arg_count]) == 0) 
+		{
+		    return ErrorAbort(state, "RunProgramFn: argument args2[%d] to %s() can't be empty", arg_count, name);
+		}
+	    }
 
-    pid_t child = fork();
-    if (child == 0) {
-        execv(args2[0], args2);
-        fprintf(stderr, "run_program: execv failed: %s\n", strerror(errno));
-        _exit(1);
+	    int a2length=strlen(args2[arg_count])+1;
+	    memmove(&args2_copy[arg_count][11], &args2_copy[arg_count][7],((a2length*sizeof(char))-7));
+	    args2_copy[arg_count][7] = 'o';
+	    args2_copy[arg_count][8] = 'r';
+	    args2_copy[arg_count][9] = 'i';
+	    args2_copy[arg_count][10] = 'g';
+	    args2_copy[arg_count][(strlen(args2_copy[arg_count]))] = '\0';
+	}
     }
+    
+    pid_t child = fork();
+    
+    if( !(safe_mode) && allow_flash_non_safe() )
+    {
+	fprintf(stderr, "about to run program [%s], argc = %d (includes [%s])\n", args2_copy[0], argc, args2_copy[0]);
+	if (child == 0)
+	{
+	    execv(args2_copy[0], args2_copy);
+	    fprintf(stderr, "run_program: execv failed: %s\n", strerror(errno));
+	    _exit(1);
+	}
+    }
+    else
+    {
+	fprintf(stderr, "about to run program [%s], argc = %d (includes [%s])\n", args2[0], argc, args2[0]);
+	if (child == 0)
+	{
+	    execv(args2[0], args2);
+	    fprintf(stderr, "run_program: execv failed: %s\n", strerror(errno));
+	    _exit(1);
+	}
+    }
+	
     int status;
     waitpid(child, &status, 0);
     if (WIFEXITED(status)) {
-        if (WEXITSTATUS(status) != 0) {
-            fprintf(stderr, "run_program: child exited with status %d\n",
-                    WEXITSTATUS(status));
-        }
+	if (WEXITSTATUS(status) != 0) {
+	    fprintf(stderr, "run_program: child exited with status %d\n",
+		    WEXITSTATUS(status));
+	}
     } else if (WIFSIGNALED(status)) {
-        fprintf(stderr, "run_program: child terminated by signal %d\n",
-                WTERMSIG(status));
+	fprintf(stderr, "run_program: child terminated by signal %d\n",
+		WTERMSIG(status));
     }
 
     int i;
     for (i = 0; i < argc; ++i) {
-        free(args[i]);
+	free(args[i]);
     }
     free(args);
     free(args2);

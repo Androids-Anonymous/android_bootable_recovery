@@ -408,7 +408,8 @@ show_wipe_menu() {
 		    erase_volume("/sdcard/.android_secure");
 		    __system("echo 1 > /.color_change");
 		    ui_print("\ndata wipe complete.\n");
-		}break;
+		}
+		break;
 	    }
 	}
 	return;
