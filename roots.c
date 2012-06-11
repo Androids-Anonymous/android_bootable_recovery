@@ -260,7 +260,7 @@ int ensure_path_mounted_at_mount_point(const char* path, const char* mount_point
 	    sprintf(mount_cmd_umount_proc, "umount /proc");
 	    sprintf(mount_cmd_mount_proc, "mount -t proc /dev/proc /proc");
 	    sprintf(mount_cmd_umount_systemorig, "umount %s", path);
-	    sprintf(mount_cmd_mount_systemorig, "mount /dev/block/mmcblk1p21 %s", path);
+	    sprintf(mount_cmd_mount_systemorig, "mount /dev/block/mmcblk1p20 %s", path);
 	    int proc_umount_res = __system(mount_cmd_umount_proc);
 	    printf("proc umount res: \"%d\"\n", proc_umount_res);
 	    int	proc_mount_res  = __system(mount_cmd_mount_proc);
@@ -372,7 +372,7 @@ int format_volume(const char* volume) {
 
     if (strcmp(v->fs_type, "ext4") == 0) {
         reset_ext4fs_info();
-        int result = make_ext4fs(v->device, NULL, NULL, 0, 0, 0);
+        int result = make_ext4fs_internal(v->device, NULL, NULL, 0, 0, 0, 0, 1, 0);
         if (result != 0) {
             LOGE("format_volume: make_extf4fs failed on %s\n", v->device);
             return -1;

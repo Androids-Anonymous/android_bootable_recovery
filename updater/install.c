@@ -16,37 +16,40 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <getopt.h>
-#include <limits.h>
-#include <linux/input.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/reboot.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <time.h>
 #include <termios.h>
 #include <unistd.h>
 #include <sys/mount.h>
 #include <sys/vfs.h>
+#include <sys/ioctl.h>
+#include <sys/reboot.h>
+#include <getopt.h>
+#include <limits.h>
+#include <linux/input.h>
+#include <signal.h>
 
 #include "cutils/misc.h"
 #include "cutils/properties.h"
 #include "edify/expr.h"
 #include "mincrypt/sha.h"
 #include "minzip/DirUtil.h"
+#include "minelf/Retouch.h"
+#include "mounts.h"
 #include "mtdutils/mtdutils.h"
 #include "updater.h"
 #include "applypatch/applypatch.h"
 #include "flashutils/flashutils.h"
 #include "../roots.h"
-#include "../mounts.h"
 #include "../safebootcommands.h"
 #include "../extendedcommands.h"
 #include "../common.h"
@@ -1415,7 +1418,7 @@ Value* ReadFileFn(const char* name, State* state, int argc, Expr* argv[]) {
     v->type = VAL_BLOB;
 
     FileContents fc;
-    if (LoadFileContents(filename, &fc) != 0) {
+    if (LoadFileContents(filename, &fc, RETOUCH_DONT_MASK) != 0) {
         ErrorAbort(state, "%s() loading \"%s\" failed: %s",
                    name, filename, strerror(errno));
         free(filename);

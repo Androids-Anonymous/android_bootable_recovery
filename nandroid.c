@@ -573,7 +573,7 @@ int nandroid_restore_partition(const char* backup_path, const char* root) {
 }
 
 int nandroid_restore(const char* backup_path,
-     int restore_system, int restore_data, int restore_cache, int restore_systemorig)
+     int restore_system, int restore_data, int restore_cache, int restore_osh, int restore_systemorig)
 {
     float total_restore_time = 0;
     float system_restore_time = SYSTEM_RESTORE_TIME;
@@ -703,7 +703,7 @@ int nandroid_main(int argc, char** argv)
         if (argc != 3)
             return nandroid_usage();
         int safemode=get_safe_mode();
-	return nandroid_restore(argv[2], 1, 1, 1, (safemode) ? 0 : 1 );
+	return nandroid_restore(argv[2], 1, 1, 1, 1, (safemode) ? 0 : 1 );
     }
     
     return nandroid_usage();

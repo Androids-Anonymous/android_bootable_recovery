@@ -1,5 +1,5 @@
-/*
- * Copyright (C) 2007 The Android Open Source Project
+/* Copyright (C) 2007 The Android Open Source Project
+ *
  * Copyright (c) 2010, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,12 +38,12 @@
 #include "firmware.h"
 #include "common.h"
 #include "cutils/properties.h"
+#include "cutils/android_reboot.h"
 #include "install.h"
 #include <minui/minui.h>
 #include "minzip/DirUtil.h"
 #include "roots.h"
 #include "recovery_ui.h"
-#include "encryptedfs_provisioning.h"
 
 #include "extendedcommands.h"
 #include "flashutils/flashutils.h"
@@ -68,9 +68,11 @@ static const char *COMMAND_FILE = "/cache/recovery/command";
 static const char *INTENT_FILE = "/cache/recovery/intent";
 static const char *LOG_FILE = "/cache/recovery/log";
 static const char *LAST_LOG_FILE = "/cache/recovery/last_log";
+static const char *CACHE_ROOT = "/cache";
 static const char *SDCARD_ROOT = "/sdcard";
 static const char *EMMC_ROOT = "/emmc";
 static int allow_display_toggle = 1;
+static int poweroff = 0;
 static const char *SDCARD_PACKAGE_FILE = "/sdcard/update.zip";
 static const char *TEMPORARY_LOG_FILE = "/tmp/recovery.log";
 static const char *SIDELOAD_TEMP_DIR = "/tmp/sideload";
@@ -190,7 +192,7 @@ static void
 get_args(int *argc, char ***argv) {
     struct bootloader_message boot;
     memset(&boot, 0, sizeof(boot));
-    if (device_flash_type() == MTD) {
+    if (device_flash_type() == MTD || device_flash_type() == MMC) {
         get_bootloader_message(&boot);  // this may fail, leaving a zeroed structure
     }
 
@@ -266,8 +268,7 @@ set_sdcard_update_bootloader_message() {
 // How much of the temp log we have copied to the copy in cache.
 static long tmplog_offset = 0;
 
-static void
-copy_log_file(const char* destination, int append) {
+void copy_log_file(const char* destination, int append) {
     FILE *log = fopen_path(destination, append ? "a" : "w");
     if (log == NULL) {
         LOGE("can't open %s\n", destination);
@@ -295,8 +296,7 @@ copy_log_file(const char* destination, int append) {
 // copy our log file to cache as well (for the system to read), and
 // record any intent we were asked to communicate back to the system.
 // this function is idempotent: call it as many times as you like.
-static void
-finish_recovery(const char *send_intent) {
+void finish_recovery(const char *send_intent) {
     // By this point, we're ready to return to the main system...
     if (send_intent != NULL) {
         FILE *fp = fopen_path(INTENT_FILE, "w");
@@ -329,8 +329,7 @@ finish_recovery(const char *send_intent) {
     sync();  // For good measure.
 }
 
-int
-erase_volume(const char *volume) {
+int erase_volume(const char *volume) {
     //ui_set_background(BACKGROUND_ICON_INSTALLING);
     ui_show_indeterminate_progress();
     ui_print("formatting %s...\n", volume);
@@ -345,8 +344,7 @@ erase_volume(const char *volume) {
     return format_volume(volume);
 }
 
-static char*
-copy_sideloaded_package(const char* original_path) {
+char* copy_sideloaded_package(const char* original_path) {
   if (ensure_path_mounted(original_path) != 0) {
     LOGE("can't mount %s\n", original_path);
     return NULL;
@@ -435,16 +433,17 @@ copy_sideloaded_package(const char* original_path) {
   return strdup(copy_path);
 }
 
-static char**
-prepend_title(const char** headers) {
+char** prepend_title(const char** headers) {
     char tmp1[PATH_MAX];
     char tmp2[PATH_MAX];
-    sprintf(tmp1, "|                         %s |", EXPAND(RECOVERY_VERSION));
-    sprintf(tmp2, "|                         safe system is: %s", safemode ? "  ENABLED |" : " DISABLED |");
-    char* title[] = { ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", 
+    
+    sprintf(tmp1,     "|| battery:         |/|  %s  |", EXPAND(RECOVERY_VERSION));
+    sprintf(tmp2,     "||                  |/|  safe system is:             ");
+  //sprintf(tmp2,     "||__________________|/___safe system is:__%s", safemode ? "_ENABLED_|/" : "DISABLED_|/");
+    char* title[] = { "//__________________//|                             |", 
 		      "",
                       "",
-		      "|,==================/\\______________________________|", 
+		      "||__________________|/|_____________________________|", 
 		       NULL
                     };
     
@@ -458,7 +457,6 @@ prepend_title(const char** headers) {
     for (p = title; *p; ++p, ++count);
     for (p = headers; *p; ++p, ++count);
     
-    
     char** new_headers = malloc((count+1) * sizeof(char*));
     char** h = new_headers;
     for (p = title; *p; ++p, ++h) *h = *p;
@@ -468,8 +466,7 @@ prepend_title(const char** headers) {
     return new_headers;
 }
 
-int
-get_menu_selection(char** headers, char** items, int menu_only,
+int get_menu_selection(char** headers, char** items, int menu_only,
                    int initial_selection, int main_menu, int adv_menu) {
     // throw away keys pressed previously, so user doesn't
     // accidentally trigger menu items.
@@ -565,12 +562,11 @@ get_menu_selection(char** headers, char** items, int menu_only,
     return chosen_item;
 }
 
-static int compare_string(const void* a, const void* b) {
+int compare_string(const void* a, const void* b) {
     return strcmp(*(const char**)a, *(const char**)b);
 }
 
-static void
-prompt_and_wait() {
+void prompt_and_wait() {
     safemode = get_safe_mode();
     char** headers = NULL;
     
@@ -637,8 +633,7 @@ prompt_and_wait() {
     }
 }
 
-static void
-print_property(const char *key, const char *name, void *cookie) {
+void print_property(const char *key, const char *name, void *cookie) {
     printf("%s=%s\n", key, name);
 }
 
@@ -701,7 +696,6 @@ main(int argc, char **argv) {
     const char *encrypted_fs_mode = NULL;
     int wipe_data = 0, wipe_cache = 0;
     int toggle_secure_fs = 0;
-    encrypted_fs_info encrypted_fs_data;
 
     LOGI("checking arguments.\n");
     int arg;
@@ -754,43 +748,7 @@ main(int argc, char **argv) {
 
     int status = INSTALL_SUCCESS;
     
-    if (toggle_secure_fs) {
-        if (strcmp(encrypted_fs_mode,"on") == 0) {
-            encrypted_fs_data.mode = MODE_ENCRYPTED_FS_ENABLED;
-            ui_print("enabling encrypted FS.\n");
-        } else if (strcmp(encrypted_fs_mode,"off") == 0) {
-            encrypted_fs_data.mode = MODE_ENCRYPTED_FS_DISABLED;
-            ui_print("disabling encrypted FS.\n");
-        } else {
-            ui_print("error: invalid encrypted FS setting.\n");
-            status = INSTALL_ERROR;
-        }
-
-        // Recovery strategy: if the data partition is damaged, disable encrypted file systems.
-        // This preventsthe device recycling endlessly in recovery mode.
-        if ((encrypted_fs_data.mode == MODE_ENCRYPTED_FS_ENABLED) &&
-                (read_encrypted_fs_info(&encrypted_fs_data))) {
-            ui_print("encrypted FS change aborted, resetting to disabled state.\n");
-            encrypted_fs_data.mode = MODE_ENCRYPTED_FS_DISABLED;
-        }
-
-        if (status != INSTALL_ERROR) {
-            if (erase_volume("/data")) {
-                ui_print("data wipe failed.\n");
-                status = INSTALL_ERROR;
-            } else if (erase_volume("/cache")) {
-                ui_print("cache wipe failed.\n");
-                status = INSTALL_ERROR;
-            } else if ((encrypted_fs_data.mode == MODE_ENCRYPTED_FS_ENABLED) &&
-                      (restore_encrypted_fs_info(&encrypted_fs_data))) {
-                ui_print("encrypted FS change aborted.\n");
-                status = INSTALL_ERROR;
-            } else {
-                ui_print("successfully updated encrypted FS.\n");
-                status = INSTALL_SUCCESS;
-            }
-        }
-    } else if (update_package != NULL) {
+    if (update_package != NULL) {
         status = install_package(update_package);
         if (status != INSTALL_SUCCESS) ui_print("installation aborted.\n");
     } else if (wipe_data) {

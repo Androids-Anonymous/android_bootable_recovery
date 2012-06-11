@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/reboot.h>
-#include <reboot/reboot.h>
+//#include <reboot/reboot.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -35,6 +35,8 @@
 #include "safebootcommands.h"
 
 #define MENU_HEADER_COLS 55
+
+#define BATTERY_CAPACITY_FILE "/sys/class/power_supply/battery/charge_counter"
 
 int safemode = 0;
 
@@ -72,44 +74,11 @@ int get_safe_mode() {
     return result;
 }
 
-static char**
-prepend_title(const char** headers) {
-    char tmp1[PATH_MAX];
-    char tmp2[PATH_MAX];
-    sprintf(tmp1, "|                         %s |", EXPAND(RECOVERY_VERSION));
-    sprintf(tmp2, "|                         safe system is: %s", safemode ? "  ENABLED |" : " DISABLED |");
-    char* title[] = { ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", 
-		      "",
-                      "",
-		      "|,==================/\\______________________________|", 
-		       NULL
-                    };
-    
-    title[1] = strdup(tmp1);
-    title[2] = strdup(tmp2);
-
-    // count the number of lines in our title, plus the
-    // caller-provided headers.
-    int count = 0;
-    char** p;
-    for (p = title; *p; ++p, ++count);
-    for (p = headers; *p; ++p, ++count);
-    
-    
-    char** new_headers = malloc((count+1) * sizeof(char*));
-    char** h = new_headers;
-    for (p = title; *p; ++p, ++h) *h = *p;
-    for (p = headers; *p; ++p, ++h) *h = *p;
-    *h = NULL;
-
-    return new_headers;
-}
-
 void show_safe_boot_menu() {
     char tmp[PATH_MAX];
     char** headers = NULL;
     char* headers_before[] = {  "||  safe-boot menu  |/____________________________,/|",
-			        "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			        "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 				 NULL
     };
     headers = prepend_title((const char**)headers_before);
@@ -136,8 +105,17 @@ void show_safe_boot_menu() {
 
 	    char confirm_tog[MENU_HEADER_COLS];
 	    sprintf(confirm_tog,  "|| <8> yes - %s safe system                  |/|", !safemode ? " enable" : "disable");
- 	    if (confirm_selection(confirm_toggle, confirm_tog)) toggle_safe_mode();
-	    break;
+ 	    if (confirm_selection(confirm_toggle, confirm_tog))
+	    {
+            	toggle_safe_mode();
+		ui_set_showing_warning(0);
+		break;
+	    }
+	    else
+	    {
+            	ui_set_showing_warning(0);
+		break;
+	    }
         }
         case 1:
         {
@@ -150,8 +128,16 @@ void show_safe_boot_menu() {
 
 	    char confirm_qtog[MENU_HEADER_COLS];
 	    sprintf(confirm_qtog, "|| <8> yes - %s safe system (DANGEROUS)      |/|", !safemode ? " enable" : "disable");
-	    if (confirm_selection(confirm_qtoggle, confirm_qtog)) quick_toggle_safe_mode();
-	    break;
+	    if (confirm_selection(confirm_qtoggle, confirm_qtog))
+	    {
+            	quick_toggle_safe_mode();
+		ui_set_showing_warning(0);
+		break;
+	    }
+	    else
+	    {
+            	ui_set_showing_warning(0);
+	    }
         }
     }
 

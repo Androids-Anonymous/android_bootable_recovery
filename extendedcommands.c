@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/reboot.h>
-#include <reboot/reboot.h>
+//#include <reboot/reboot.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
 #include <time.h>
@@ -48,6 +48,8 @@
 #define MENU_HEADER_COLS 55
 
 #define FLASH_NS_FILE "/.flash_non_safe"
+
+#define BATTERY_CAPACITY_FILE "/sys/class/power_supply/battery/charge_counter"
 
 int poweroff = 0;
 int signature_check_enabled = 1;
@@ -195,44 +197,11 @@ int install_zip(const char* packagefilepath)
     return 0;
 }
 
-static char**
-prepend_title(const char** headers) {
-    char tmp1[PATH_MAX];
-    char tmp2[PATH_MAX];
-    sprintf(tmp1, "|                         %s |", EXPAND(RECOVERY_VERSION));
-    sprintf(tmp2, "|                         safe system is: %s", safemode ? "  ENABLED |" : " DISABLED |");
-    char* title[] = { ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", 
-		      "",
-                      "",
-		      "|,==================/\\______________________________|", 
-		       NULL
-                    };
-    
-    title[1] = strdup(tmp1);
-    title[2] = strdup(tmp2);
-
-    // count the number of lines in our title, plus the
-    // caller-provided headers.
-    int count = 0;
-    char** p;
-    for (p = title; *p; ++p, ++count);
-    for (p = headers; *p; ++p, ++count);
-    
-    
-    char** new_headers = malloc((count+1) * sizeof(char*));
-    char** h = new_headers;
-    for (p = title; *p; ++p, ++h) *h = *p;
-    for (p = headers; *p; ++p, ++h) *h = *p;
-    *h = NULL;
-
-    return new_headers;
-}
-
 int show_sdcard_selection_menu()
 {
     char** headers = NULL;
     char* headers_iore[] = { "||  choose SD card  |/____________________________,/|",
-			     "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			     "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			     NULL
 			   };
     headers = prepend_title((const char**)headers_iore);
@@ -240,6 +209,7 @@ int show_sdcard_selection_menu()
                      "|| <2> external SD card                           |/|",
 	             NULL
                    };
+    ui_set_showing_warning(0);
     int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
     return (chosen_item < 2) ? chosen_item : -1;
 }
@@ -247,8 +217,8 @@ int show_sdcard_selection_menu()
 int show_reboot_menu() {
     char tmp[PATH_MAX];               
     char** headers = NULL;
-    char* headers_reb[] = {  "|| reboot / power off |/__________________________,/|",
-			     "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+    char* headers_reb[] = {  "||reboot / power off|/____________________________,/|",
+			     "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			     NULL
     			  };
 
@@ -259,13 +229,17 @@ int show_reboot_menu() {
                              "|| <2> power off                                  |/|",
 			     NULL
     };
-    
+    ui_set_showing_warning(0);
+
     for (;;)
     {
         int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
         if (chosen_item == GO_BACK)
+    	{
+	    ui_set_showing_warning(0);
 	    break;
-        switch (chosen_item)
+        }
+	switch (chosen_item)
         {
             case 0:
             {
@@ -299,7 +273,7 @@ show_wipe_menu() {
 
     char** headers = NULL;
     const char* headers_wipe[] = {  "||    wipe  menu    |/____________________________,/|",
-			            "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			            "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			            NULL
                                  };
     headers = prepend_title((const char**)headers_wipe);
@@ -324,12 +298,14 @@ show_wipe_menu() {
     char confirm_wipedata[MENU_HEADER_COLS]  = "|| <8> yes - wipe data                            |/|" ; 
     char confirm_wipeall[MENU_HEADER_COLS]   = "|| <8> yes - wipe everything (!)                  |/|" ; 
    
+    ui_set_showing_warning(0);
     int chosen_item = get_menu_selection(headers, WIPE_ITEMS, 0, 0, 0, 0);
     
     for(;;)
     { 
 	if (chosen_item == GO_BACK)
 	{
+    	    ui_set_showing_warning(0);
 	    return;
 	}
         
@@ -340,10 +316,14 @@ show_wipe_menu() {
 		char* confirm_wi = strdup(confirm_wipecache);   
     		if (confirm_selection(confirm_wipe,confirm_wi))
                 {
+            	    ui_set_showing_warning(0);
                     ui_print("\n-- wiping cache...\n");
                     erase_volume("/cache");
 		    __system("echo 1 > /.color_change");
                     ui_print("cache wipe complete.\n");
+		} else
+		{
+            	    ui_set_showing_warning(0);
 		}
 		break;
 	    }
@@ -361,6 +341,7 @@ show_wipe_menu() {
 
 		if (confirm_selection(confirm_wipe,confirm_wi))
 		{
+            	    ui_set_showing_warning(0);
 		    ui_print("\nwiping dalvik cache...\n");
 
 		    __system("rm -r /data/dalvik-cache");
@@ -369,6 +350,9 @@ show_wipe_menu() {
 		    __system("echo 1 > /.color_change");
 		    ui_print("\ndalvik cache wiped.\n");
 		    ensure_path_unmounted("/data");
+		} else
+		{
+            	    ui_set_showing_warning(0);
 		}
 		break;
 	    }
@@ -381,11 +365,15 @@ show_wipe_menu() {
 		}
 		if (confirm_selection(confirm_wipe,confirm_wi))
 		{
+            	    ui_set_showing_warning(0);
 		    ui_print("\nwiping data...\n");
 		    erase_volume("/data");
 		    __system("echo 1 > /.color_change");
 		    ui_print("\ndata wipe complete.\n");
 		    ensure_path_unmounted("/data");
+		} else
+		{
+            	    ui_set_showing_warning(0);
 		}
 		break;	
 	    }
@@ -394,6 +382,7 @@ show_wipe_menu() {
 		char* confirm_wi = strdup(confirm_wipeall);   
 		if (confirm_selection(confirm_wipe,confirm_wi))
 		{
+            	    ui_set_showing_warning(0);
 		    ui_print("\nwiping everything...\n");
 		    device_wipe_data();
 		    erase_volume("/data");
@@ -408,10 +397,14 @@ show_wipe_menu() {
 		    erase_volume("/sdcard/.android_secure");
 		    __system("echo 1 > /.color_change");
 		    ui_print("\ndata wipe complete.\n");
+		} else
+		{
+            	    ui_set_showing_warning(0);
 		}
 		break;
 	    }
 	}
+    	ui_set_showing_warning(0);
 	return;
     }
 }
@@ -437,7 +430,7 @@ void show_install_update_menu()
 #endif
     char** headers = NULL;
     char* headers_up[] = {  "||   update  menu   |/____________________________,/|",
-			    "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			    "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			     NULL
                                };
     headers = prepend_title((const char**)headers_up);    
@@ -447,17 +440,21 @@ void show_install_update_menu()
 					"|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|",
 				    NULL
 				    };
-
+    ui_set_showing_warning(0);
     for (;;)
     {
         int chosen_item = get_menu_selection(headers, INSTALL_MENU_ITEMS, 0, 0, 0, 0);
 	if(chosen_item == GO_BACK)
+    	{
+	   ui_set_showing_warning(0);
 	   return;
+	}
 	switch (chosen_item)
         {
             case ITEM_CHOOSE_ZIP:
             {
 #ifdef BOARD_HAS_SDCARD_INTERNAL
+    		ui_set_showing_warning(0);
                 chosen_sdcard = show_sdcard_selection_menu();
                 //if (chosen_sdcard > -1)
                 //{
@@ -481,6 +478,7 @@ void show_install_update_menu()
                     }
                 //}
                 //else return;
+    		ui_set_showing_warning(0);
                 show_choose_zip_menu(sdcard_package_file);
 #else
                 show_choose_zip_menu("/sdcard/");
@@ -491,6 +489,7 @@ void show_install_update_menu()
 	    }            
             case ITEM_APPLY_SDCARD:
             {
+	   	ui_set_showing_warning(0);
 #ifdef BOARD_HAS_SDCARD_INTERNAL
                 chosen_sdcard = show_sdcard_selection_menu();
                 //if (chosen_sdcard > -1)
@@ -514,25 +513,31 @@ void show_install_update_menu()
                 
 		if (confirm_selection(confirm_install, confirmsd))
                 {
+            	    ui_set_showing_warning(0);
     		    int zipret = install_zip(sdcard_package_file);
 		    if ( !zipret && allow_flash_non_safe() )
 		    {
 		        restore_ss_files("/sbin/restore_ss_files.sh");
 		    }
-		} 
+		} else
+		{
+            	    ui_set_showing_warning(0);
+		}
 		break;
 #else
 		char confirm_update[MENU_HEADER_COLS] = "|| <8> yes - install update                       |/|";
 
 		if (confirm_selection(confirm_install, confirm_update))
 		{
+            	    ui_set_showing_warning(0);
     		    int zipret = install_zip(SDCARD_UPDATE_FILE);
 		    if ( !zipret && allow_flash_non_safe() )
 		    {
 		        restore_ss_files("/sbin/restore_ss_files.sh");
 		    }
-		}
-#endif
+		} else ui_set_showing_warning(0);
+ 
+            	    #endif
 	        break;
 	    }
             
@@ -720,7 +725,10 @@ char* choose_file_menu(const char* directory, const char* fileExtensionOrDirecto
         {
             int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
             if (chosen_item == GO_BACK)
+	    {
+    		ui_set_showing_warning(0);
                 break;
+	    }
             static char ret[PATH_MAX];
             if (chosen_item < numDirs)
             {
@@ -753,10 +761,11 @@ void show_choose_zip_menu(const char *mount_point)
     }
     char** headers = NULL;
     char** headers_zip[] = {  "|| choose .zip file |/____________________________,/|",
-			      "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			      "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			       NULL
     };
     headers = prepend_title((const char**)headers_zip);
+    ui_set_showing_warning(0);
     char* file = choose_file_menu(mount_point, ".zip", headers);
     if (file == NULL)
         return;
@@ -769,14 +778,17 @@ void show_choose_zip_menu(const char *mount_point)
     char confirmpath[PATH_MAX];
     char filler[PATH_MAX];
     snprintf(confirmpath, (strlen("|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|")+1), "|| <8> yes - install %-27.27s  |/|", basename(file));
+
     if (confirm_selection(confirm_install, confirmpath))
     {
+        ui_set_showing_warning(0);
         int zipret = install_zip(file);
 	if (!(zipret) && allow_flash_non_safe())
 	{
 	    restore_ss_files("/sbin/restore_ss_files.sh");
 	}
-    }
+    } else ui_set_showing_warning(0);
+
     return;
 }
 
@@ -787,32 +799,36 @@ void show_nandroid_restore_menu(const char* path)
         return;
     }
 
-    int restore_webtop = 1;
+    int restore_webtop = 0;
     char** headers = NULL;
     char** headers_nanr[] = {  "|| choose the image |/____________________________,/|",
-			       "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			       "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			       NULL
     		       };
     headers = prepend_title((const char**)headers_nanr);
     char tmp[PATH_MAX];
     sprintf(tmp, "%s/%s/backup/", path, EXPAND(RECOVERY_FOLDER));
+    
+    ui_set_showing_warning(0);
     char* file = choose_file_menu(tmp, NULL, headers);
     if (file == NULL)
         return;
 
 #ifdef BOARD_HAS_WEBTOP
-    static char** header[] = { "|| include  webtop? |/____________________________,/|",
+    char** headers_wt1 = NULL;
+    static char** header_wt1[] = { "|| include  webtop? |/____________________________,/|",
 			       "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			        NULL
     };
 
+    headers_wt1 = prepend_title((const char**)header_wt1);
     static char** list[] = { "|| <1> yes - include webtop                       |/|",
                              "|| <2> no                                         |/|",
 			     NULL
 
     };
 
-    switch (get_menu_selection(header, list, 0, 0, 0, 0))
+    switch (get_menu_selection(headers_wt1, list, 0, 0, 0, 0))
     {
         case 0:
 	    restore_webtop = 1;
@@ -831,8 +847,11 @@ void show_nandroid_restore_menu(const char* path)
     char confirm_re2[MENU_HEADER_COLS] = "|| <8> yes - restore                              |/|";
 
 	if (confirm_selection(confirm_restore, confirm_re2))
-        nandroid_restore(file, 1, 1, 1, (safemode) ? 0 : 1);
-    
+        {    
+            ui_set_showing_warning(0);
+	    nandroid_restore(file, 1, 1, 1, restore_webtop, (safemode) ? 0 : 1);
+    	} else ui_set_showing_warning(0);
+
     return;
 }
 
@@ -844,7 +863,7 @@ void show_nandroid_verify_menu(const char* volume)
     }
     char** headers = NULL;
     char** headers_ver[] = { "||   choose image   |/____________________________,/|",
-			 "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			 "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			  NULL
 
     };
@@ -866,6 +885,7 @@ void show_nandroid_verify_menu(const char* volume)
     
     if (confirm_selection(confirm_verify, confirm_ver))
     {
+        ui_set_showing_warning(0);
         char tmp[PATH_MAX];
         //ui_set_background(BACKGROUND_ICON_INSTALLING);
         ui_show_indeterminate_progress();
@@ -880,15 +900,16 @@ void show_nandroid_verify_menu(const char* volume)
         ui_set_background(BACKGROUND_ICON_NONE);
         ui_reset_progress();
         ui_print("\nverify complete.\n");
-    }
+    } else ui_set_showing_warning(0);
+
     return;
 }
 
 #ifndef BOARD_UMS_LUNFILE
 #ifdef BOARD_HAS_SDCARD_INTERNAL
-#define BOARD_UMS_LUNFILE "/sys/devices/platform/usb_mass_storage/lun1/file"
+#define BOARD_UMS_LUNFILE "/sys/class/android_usb/f_mass_storage/lun1/file"
 #else
-#define BOARD_UMS_LUNFILE "/sys/devices/platform/usb_mass_storage/lun0/file"
+#define BOARD_UMS_LUNFILE "/sys/class/android_usb/f_mass_storage/lun0/file"
 #endif
 #endif
 
@@ -896,31 +917,41 @@ void show_mount_usb_storage_menu()
 {
     int fd, fd2;
     Volume *vol = volume_for_path("/sdcard");
-    if ((fd = open(BOARD_UMS_LUNFILE, O_WRONLY)) < 0) {
-        LOGE("unable to open ums lunfile (%s)", strerror(errno));
-        return -1;
-    }
+    char cmd[PATH_MAX];
+    char cmd1[PATH_MAX];
+    char cmd2[PATH_MAX];
+    fprintf(stderr, "testing: sdcard device is \"%s\"\n", vol->device);
+    sprintf(cmd, "/sbin/toolbox setprop sys.sdcard.device %s", vol->device);
+    __system(cmd);
+    //sprintf(cmd, "echo \"0\" > /sys/class/android_usb/android0/enable; echo \"22b8\" > /sys/class/android_usb/android0/idVendor; echo \"4366\" > /sys/class/android_usb/android0/idProduct; echo \"1\" > /sys/module/g_android/parameters/cdrom; echo \"0\" > /sys/module/g_android/parameters/cdrom_switch; echo \"mass_storage,adb\" > /sys/class/android_usb/android0/functions; echo \"1\" > /sys/class/android_usb/android0/enable");
+    sprintf(cmd1, "/sbin/toolbox setprop sys.usb.mountsd 1");
+    __system(cmd1);
 
-    if ((write(fd, vol->device, strlen(vol->device)) < 0) &&
-        (!vol->device2 || (write(fd, vol->device, strlen(vol->device2)) < 0))) {
-        LOGE("unable to write to ums lunfile (%s)", strerror(errno));
-        close(fd);
-        return -1;
-    }
-#ifdef BOARD_HAS_SDCARD_INTERNAL
-    vol = volume_for_path("/emmc");
-    if ((fd2 = open("/sys/devices/platform/usb_mass_storage/lun0/file", O_WRONLY)) < 0) {
-        LOGE("unable to open ums lunfile for internal SD card (%s)", strerror(errno));
-    }
-    else if ((write(fd2, vol->device, strlen(vol->device)) < 0) &&
-        (!vol->device2 || (write(fd2, vol->device, strlen(vol->device2)) < 0))) {
-        LOGE("unable to write to ums lunfile for internal SD card (%s)", strerror(errno));
-        close(fd2);
-    }
-#endif
+    //if ((fd = open("/sys/class/android_usb/f_mass_storage/lun0/file", O_WRONLY)) < 0) {
+    //    LOGE("unable to open ums lunfile (%s)", strerror(errno));
+    //    return -1;
+    //}
+
+    //if ((write(fd, vol->device, strlen(vol->device)) < 0) &&
+    //    (!vol->device2 || (write(fd, vol->device, strlen(vol->device2)) < 0))) {
+    //    LOGE("unable to write to ums lunfile (%s)", strerror(errno));
+    //    close(fd);
+    //    return -1;
+    //}
+//#ifdef BOARD_HAS_SDCARD_INTERNAL
+  //  vol = volume_for_path("/emmc");
+   // if ((fd2 = open("/sys/class/android_usb/f_mass_storage/lun1/file", O_WRONLY)) < 0) {
+   //     LOGE("unable to open ums lunfile for internal SD card (%s)", strerror(errno));
+   // }
+   // else if ((write(fd2, vol->device, strlen(vol->device)) < 0) &&
+   //     (!vol->device2 || (write(fd2, vol->device, strlen(vol->device2)) < 0))) {
+    //    LOGE("unable to write to ums lunfile for internal SD card (%s)", strerror(errno));
+    //    close(fd2);
+   // }
+//#endif
     char** headers = NULL;
     char* headers_usb[] = {   "|| USB mass storage |/____________________________,/|",
-			      "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			      "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			      "||  leaving this menu will unmount all SD cards   |/|",
                               "||  from your PC.                                 |/|",
 			      NULL
@@ -929,7 +960,8 @@ void show_mount_usb_storage_menu()
     char* list[] = {
 		     NULL		
                    };
-
+    
+    ui_set_showing_warning(0);
     for (;;)
     {
         int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
@@ -937,37 +969,44 @@ void show_mount_usb_storage_menu()
             break;
     }
 
-    if ((fd = open(BOARD_UMS_LUNFILE, O_WRONLY)) < 0) {
-        LOGE("unable to open ums lunfile (%s)", strerror(errno));
-        return -1;
-    }
+    sprintf(cmd2, "/sbin/toolbox setprop sys.usb.mountsd 0");
+    __system(cmd2);
+   // if ((fd = open("/sys/class/android_usb/f_mass_storage/lun0/file", O_WRONLY)) < 0) {
+   //     LOGE("unable to open ums lunfile (%s)", strerror(errno));
+   //     return -1;
+   // }
 
-    char ch = 0;
-    if (write(fd, &ch, 1) < 0) {
-        LOGE("unable to write to ums lunfile (%s)", strerror(errno));
-        close(fd);
-        return -1;
-    }
-#ifdef BOARD_HAS_SDCARD_INTERNAL
-    if ((fd2 = open("/sys/devices/platform/usb_mass_storage/lun0/file", O_WRONLY)) < 0) {
-        LOGE("unable to open ums lunfile for internal SD card (%s)", strerror(errno));
-    }
-    else if (write(fd2, &ch, 1) < 0) {
-	    LOGE("unable to write to ums lunfile for internal SD card (%s)", strerror(errno));
-        close(fd2);
-    }
-#endif
+   // char ch = 0;
+   // if (write(fd, &ch, 1) < 0) {
+   //     LOGE("unable to write to ums lunfile (%s)", strerror(errno));
+    //    close(fd);
+    //    return -1;
+   // }
+//#ifdef BOARD_HAS_SDCARD_INTERNAL
+  //  if ((fd2 = open("/sys/class/android_usb/f_mass_storage/lun1/file", O_WRONLY)) < 0) {
+  //      LOGE("unable to open ums lunfile for internal SD card (%s)", strerror(errno));
+   // }
+   // else if (write(fd2, &ch, 1) < 0) {
+//	    LOGE("unable to write to ums lunfile for internal SD card (%s)", strerror(errno));
+ //       close(fd2);
+  //  }
+//#endif
 }
 
 int confirm_selection(const char** title, char* confirm)
 {
-	struct stat info;
+    struct stat info;
+    
     if (0 == stat("/sdcard/safestrap/.no_confirm", &info))
 	    return 1;
 #ifdef BOARD_HAS_SDCARD_INTERNAL
     if (0 == stat("/emmc/safestrap/.no_confirm", &info))
         return 1;
 #endif
+    //inform the recovery that we're displaying the warning banner;
+    //this is to disable the battery stats overlay    
+    ui_set_showing_warning(1);
+
     //char title_l0[MENU_HEADER_COLS];
     char* title_l0 = strdup(title[0]);
 
@@ -982,23 +1021,23 @@ int confirm_selection(const char** title, char* confirm)
 //    char title_l5[MENU_HEADER_COLS];
 //    strcpy(title_l5,title[5]);
 
-    char* confirm_headers[]  = {   		   ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", //0
-						   "|                                __                 |", //1
+    char* confirm_headers[]  = {   		   ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.",    
+						   "|                                __                 |",    
 						   "|  __  _  _______ _______  ____ |__| ____    ____   |", 
 						   "|  \\ \\/ \\/ /\\__  \\\\_  __ \\/    \\|  |/    \\  / ___\\  |",
 						   "|   \\     /  / __ \\|  | \\/   |  \\  |   |  \\/ /_/  > |",
-						   "|    \\/\\_/  (____  /__|  |___|  /__|___|  /\\___  /  |", //5
+						   "|    \\/\\_/  (____  /__|  |___|  /__|___|  /\\___  /  |",    
 						   "|                \\/           \\/        \\//_____/   |",
-						   "|       ___ (^')(^')             (^`)(^`) ___       |",
-						   "|      /   \\_\\ \\/ /               \\ \\/ /_/   \\      |",
-						   "|     |   x_ ]\\ \\/                 \\/ /[ _x   |     |",
-						   "|     |   x _]/\\ \\                 / /\\[_ x   |     |", //10
-						   "|      \\___/ / /\\ \\               / /\\ \\ \\___/      |",
-						   "|           (_.)(._)             (_.)(._)           |", //12
-						   "|                                                   |", //13
+						   "|                                                   |",
+						   "|                                                   |",
+						   "|                                                   |",
+						   "|                                                   |",     
+						   "|                                                   |",
+						   "|                                                   |",     
+						   "|                                                   |",     
 						   "",
 						   "",
-						   "",   //16
+						   "",       
 						   NULL};
     
     confirm_headers[14] = title_l0;
@@ -1197,7 +1236,7 @@ void show_partition_menu()
 {
     char** headers = NULL;
     char* headers_msm[] = {  "|| mounts & storage |/____________________________,/|",
-			     "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			     "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 		              NULL
     		           };
     headers = prepend_title((const char**)headers_msm);
@@ -1233,48 +1272,54 @@ void show_partition_menu()
 					sprintf(&mount_menue[mountable_volumes].mount, "|| <1> mount %s                              |/|", v->mount_point);
                                 	sprintf(&mount_menue[mountable_volumes].unmount, "|| <1> unmount %s                            |/|", v->mount_point);
 }
-
 				if(strcmp("\/emmc", v->mount_point) == 0) {
 					sprintf(&mount_menue[mountable_volumes].mount, "|| <2> mount %s                                |/|", v->mount_point);
                                 	sprintf(&mount_menue[mountable_volumes].unmount, "|| <2> unmount %s                              |/|", v->mount_point);
 }
+				if(strcmp("\/osh", v->mount_point) == 0) {
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <3> mount %s                                 |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].unmount, "|| <3> unmount %s                               |/|", v->mount_point);
+}
 
 				if(strcmp("\/systemorig", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <3> mount %s                          |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <3> unmount %s                        |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <4> mount %s                          |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <4> unmount %s                        |/|", v->mount_point);
 }
 
 				if(strcmp("\/cache", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <4> mount %s                               |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <4> unmount %s                             |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <5> mount %s                               |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <5> unmount %s                             |/|", v->mount_point);
 }
 
 				if(strcmp("\/system", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <5> mount %s                              |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <5> unmount %s                            |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <6> mount %s                              |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <6> unmount %s                            |/|", v->mount_point);
 }
 
 				if(strcmp("\/data", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <6> mount %s                                |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <6> unmount %s                              |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <7> mount %s                                |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <7> unmount %s                              |/|", v->mount_point);
 }
 				mount_menue[mountable_volumes].v = &device_volumes[i];
 				++mountable_volumes;
 				if (is_safe_to_format(v->mount_point)) {
 					if(strcmp("\/sdcard", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <7> format %s                             |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <8> format %s                             |/|",v->mount_point);
 					}
 					if(strcmp("\/emmc", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <8> format %s                               |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <9> format %s                               |/|",v->mount_point);
+					}
+					if(strcmp("\/osh", v->mount_point) == 0) {
+						sprintf(&format_menue[formatable_volumes].txt, "|| <0> format %s                                |/|",v->mount_point);
 					}
 					if(strcmp("\/cache", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <9> format %s                              |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <A> format %s                              |/|",v->mount_point);
 					}
 					if(strcmp("\/system", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <0> format %s                             |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <B> format %s                             |/|",v->mount_point);
 					}
 					if(strcmp("\/data", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <A> format %s                               |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <C> format %s                               |/|",v->mount_point);
 					}
 
 					format_menue[formatable_volumes].v = &device_volumes[i];
@@ -1299,6 +1344,7 @@ void show_partition_menu()
 
     char confirm_f[MENU_HEADER_COLS] = "|| <8> yes - confirm format                       |/|";
 
+    ui_set_showing_warning(0);
     for (;;)
     {
 
@@ -1319,11 +1365,12 @@ void show_partition_menu()
 			options[mountable_volumes+i] = e->txt;
 		}
 
-        options[mountable_volumes+formatable_volumes] = "|| <B> mount USB storage                          |/|";
+        options[mountable_volumes+formatable_volumes] = "|| <D> mount USB storage                          |/|";
         options[mountable_volumes+formatable_volumes + 1] = NULL;
 
         int chosen_item = get_menu_selection(headers, &options, 0, 0, 0, 0);
 	if (chosen_item == GO_BACK)
+    	    ui_set_showing_warning(0);
             return;
         if (chosen_item == (mountable_volumes+formatable_volumes))
         {
@@ -1354,7 +1401,8 @@ void show_partition_menu()
             //sprintf(confirm_string, "%s - %s", v->mount_point, confirm_format);
 
             if (!confirm_selection(confirm_format, confirm_f))
-                continue;
+                ui_set_showing_warning(0);
+	   	continue;
             ui_print("formatting %s...\n", v->mount_point);
             if (0 != format_volume(v->mount_point))
                 ui_print("error formatting %s.\n", v->mount_point);
@@ -1370,13 +1418,14 @@ void show_partition_menu()
 
 void show_nandroid_advanced_restore_menu(const char* path)
 {
+    int restore_webtop = 0;
     if (ensure_path_mounted(path) != 0) {
         LOGE ("can't mount /sdcard\n");
         return;
     }
     char** advancedheaders = NULL;
     static char* advancedheaders_before[] = {  "|| image  selection |/____________________________,/|",
-                                	       "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+                                	       "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
                                 	       "||------------------------------------------------|/|",
                                 	       "||  choose an image to restore first.  then you   |/|",
                                 	       "||  can select the partition you wish to restore. |/|",
@@ -1385,16 +1434,18 @@ void show_nandroid_advanced_restore_menu(const char* path)
 
                                              };
 
+    ui_set_showing_warning(0);
     advancedheaders = prepend_title((const char**)advancedheaders_before);
     char tmp[PATH_MAX];
     sprintf(tmp, "%s/%s/backup/", path, EXPAND(RECOVERY_FOLDER));
 
     char* file = choose_file_menu(tmp, NULL, advancedheaders);
     if (file == NULL)
+    	ui_set_showing_warning(0);
         return;
     char** headers = NULL;
     char* headers_adv[] = {  "|| advanced restore |/____________________________,/|",
-			     "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			     "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 		              NULL
 
     };
@@ -1421,20 +1472,32 @@ void show_nandroid_advanced_restore_menu(const char* path)
 
     int chosen_item = get_menu_selection(headers, list, 0, 0, 0, 0);
      if (chosen_item == 0){
-        if (confirm_selection(confirm_restore, confirm_rs))
-            nandroid_restore(file, 1, 0, 0, 0);
+        if (confirm_selection(confirm_restore, confirm_rs)){
+            ui_set_showing_warning(0);
+            nandroid_restore(file, 1, 0, 0, restore_webtop, 0);
+	} else ui_set_showing_warning(0);
+
        }
        if (chosen_item == 1){
-        if (confirm_selection(confirm_restore, "|| <8> yes - restore /data                        |/|"))
-            nandroid_restore(file, 0, 1, 0, 0);
+        if (confirm_selection(confirm_restore, "|| <8> yes - restore /data                        |/|")){
+            ui_set_showing_warning(0);
+            nandroid_restore(file, 0, 1, 0, restore_webtop, 0);
+	} else ui_set_showing_warning(0);
+
        }
        if (chosen_item == 2){
-        if (confirm_selection(confirm_restore, "|| <8> yes - restore /cache                       |/|"))
-            nandroid_restore(file, 0, 0, 1, 0);
+        if (confirm_selection(confirm_restore, "|| <8> yes - restore /cache                       |/|")){
+            ui_set_showing_warning(0);
+            nandroid_restore(file, 0, 0, 1, restore_webtop, 0);
+	} else ui_set_showing_warning(0);
+
        }
        if (chosen_item == 3){
-        if (confirm_selection(confirm_restore, "|| <8> yes - restore /systemorig                  |/|"))
-            nandroid_restore(file, 0, 0, 0, 1);
+        if (confirm_selection(confirm_restore, "|| <8> yes - restore /systemorig                  |/|")){
+            ui_set_showing_warning(0);
+            nandroid_restore(file, 0, 0, 0, restore_webtop, 1);
+	} else ui_set_showing_warning(0);
+
        }
        return;
 }
@@ -1443,7 +1506,7 @@ void show_nandroid_menu()
 {
     char** headers = NULL;
     char* headers_nan[] = {    "||  nandroid  menu  |/____________________________,/|",
-			       "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+			       "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 		               NULL
     		           };
 
@@ -1456,6 +1519,7 @@ void show_nandroid_menu()
 		            NULL
     		       };
     safemode = get_safe_mode();
+    ui_set_showing_warning(0);
 #ifdef BOARD_HAS_SDCARD_INTERNAL
     int chosen_sdcard = -1;
 #endif
@@ -1487,20 +1551,23 @@ void show_nandroid_menu()
 #endif
                 int skip_webtop = 1;
 #ifdef BOARD_HAS_WEBTOP
-                static char** header[] = { "|| include  webtop? |/____________________________,/|",
-					   "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+                static char** header_wt2[] = { "|| include  webtop? |/____________________________,/|",
+					   "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 		            		   NULL
 
                 };
 
+    		char** headers_wt2 = NULL;
+    		headers_wt2 = prepend_title((const char**)header_wt2);
                 static char** item[] = { "|| <1> yes - include webtop                       |/|",
                                          "|| <2> no                                         |/|", 
 		            		 NULL
 
                 };
 
-                skip_webtop = get_menu_selection(header, item, 0, 0, 0, 0);
+                skip_webtop = get_menu_selection(headers_wt2, item, 0, 0, 0, 0);
                 if (skip_webtop == GO_BACK) {
+    		    ui_set_showing_warning(0);
                     return;
                 }
 #endif
@@ -1508,7 +1575,7 @@ void show_nandroid_menu()
                 if (safemode) {
                     char** header = NULL;
 		    static char** header_origs[] = { "||include  /sysorig?|/____________________________,/|",
-					       "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+					       "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 		            			NULL
 
                     			    };
@@ -1520,6 +1587,7 @@ void show_nandroid_menu()
                     			  };
                     skip_origsys = get_menu_selection(header, item, 0, 0, 0, 0);
                     if (skip_origsys == GO_BACK) {
+    		    	ui_set_showing_warning(0);
                         return;
                     }
                 }
@@ -1610,17 +1678,21 @@ void show_advanced_menu(int safemode_enabled)
 {
     char** headers = NULL;
     char* headers_advdbg[] = {  "||  advanced  menu  |/____________________________,/|",
-				"|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+				"||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 		                NULL
     };
 
     headers = prepend_title((const char**)headers_advdbg);
+    ui_set_showing_warning(0);
 
     for (;;)
     {
 	int chosen_item = get_menu_selection(headers, ADV_MENU_ITEMS, 0, 0, 0, safemode_enabled);
 	if (chosen_item == GO_BACK)
+    	{
+	    ui_set_showing_warning(0);
             return;
+	}
         switch (chosen_item)
         {
             case PRINT_LOG:
@@ -1635,8 +1707,9 @@ void show_advanced_menu(int safemode_enabled)
 	    }
  	    case KEY_TEST:
             {
-                ui_print("outputting key codes.\n");
-                ui_print("push back key to end debugging.\n");
+	    	ui_set_showing_warning(1);
+		ui_print("outputting key codes.\n");
+                ui_print("push CAPS LOCK to end debugging.\n");
                 int key;
                 int action;
                 do
@@ -1646,6 +1719,7 @@ void show_advanced_menu(int safemode_enabled)
                     ui_print("key: %d\n", key);
                 }
                 while (action != GO_BACK);
+	    	ui_set_showing_warning(0);
                 break;
             } 
             
@@ -1660,8 +1734,11 @@ void show_advanced_menu(int safemode_enabled)
 	
 		char confirm_bat[MENU_HEADER_COLS] = "|| <8> yes - wipe battery statistics              |/|";
  
-		if (confirm_selection( confirm_wipe, confirm_bat))
+		if (confirm_selection( confirm_wipe, confirm_bat)){
+            	    ui_set_showing_warning(0);
                     wipe_battery_stats();
+		} else ui_set_showing_warning(0);
+
                 break;
             }
             
@@ -1697,11 +1774,11 @@ void show_advanced_menu(int safemode_enabled)
                 char** ext_headers = NULL;
 		char** swap_headers = NULL;
 		char* ext_headers_b[] = { "||  external  size  |/____________________________,/|",
-				          "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
+				          "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
 					  NULL
 					};
                 char* swap_headers_b[] = { "||     swap size    |/____________________________,/|",
-				           "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
+				           "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
 					    NULL 
 					 };
 		ext_headers = prepend_title((const char**)ext_headers_b);
@@ -1754,11 +1831,11 @@ void show_advanced_menu(int safemode_enabled)
                 char** dat_headers = NULL;
 		char** swap_headers = NULL;
                 char* dat_headers_b[] = { "||  internal  size  |/____________________________,/|",
-				          "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
+				          "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
 					  NULL 
 				        };
                 char* swap_headers_b[] = { "||    swap  size    |/____________________________,/|",
-				           "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
+				           "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|", 
 					    NULL  
 					 };
 		dat_headers = prepend_title((const char**)dat_headers_b);
@@ -1810,12 +1887,21 @@ void show_advanced_menu(int safemode_enabled)
 		    char confirm2[MENU_HEADER_COLS] = "|| <8> yes - i know what i'm doing                |/|"; 
 		    if(confirm_selection(confirm_sure, confirm2 ))
 		    {
+            	    	ui_set_showing_warning(0);
 			set_flash_non_safe(1);
 			backup_ss_files("/sbin/backup_ss_files.sh");	
 			show_install_update_menu();
 			return;
-		    } else set_flash_non_safe(0);
-		} else set_flash_non_safe(0);
+		    } else
+		    {
+			ui_set_showing_warning(0);
+			set_flash_non_safe(0);
+		    }
+		} else 
+		{
+		    ui_set_showing_warning(0);
+		    set_flash_non_safe(0);
+		}
 	    break;
 	    }
         }
@@ -1941,7 +2027,7 @@ void process_volumes() {
     ui_print("in case of error.\n");
 
     nandroid_backup(backup_path, "/sdcard", 0, 0);
-    nandroid_restore(backup_path, 1, 1, 1, 0);
+    nandroid_restore(backup_path, 1, 1, 1, 0, 0);
     ui_set_show_text(0);
 }
 

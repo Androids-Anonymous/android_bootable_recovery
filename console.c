@@ -72,7 +72,9 @@
 
 #define ESC 27
 
-#define ALT_BACKLIGHT_FILE      "/sys/class/leds/alt-key-light/brightness"
+#define BATTERY_CAPACITY_FILE "/sys/class/power_supply/battery/charge_counter"
+
+//#define ALT_BACKLIGHT_FILE      "/sys/class/leds/alt-key-light/brightness"
 #define SHIFT_BACKLIGHT_FILE    "/sys/class/leds/shift-key-light/brightness"
 
 #define BASH_RC_FILE		"/cache/.safestrap/home/.bashrc"
@@ -230,6 +232,14 @@ init_keypad_layout()
 	qwerty_layout.shifted[KEY_DOT] = ':';
 	qwerty_layout.alternate[KEY_DOT] = ':';
 
+	qwerty_layout.normal[KEY_MINUS] = '-';
+	qwerty_layout.shifted[KEY_MINUS] = '_';
+	qwerty_layout.alternate[KEY_MINUS] = '@';
+
+	qwerty_layout.normal[KEY_EQUAL] = '=';
+	qwerty_layout.shifted[KEY_EQUAL] = '+';
+	qwerty_layout.alternate[KEY_EQUAL] = '+';
+
 	qwerty_layout.normal[KEY_SLASH] = '/';
 	qwerty_layout.shifted[KEY_SLASH] = '?';
 	qwerty_layout.alternate[KEY_SLASH] = '?';
@@ -246,10 +256,6 @@ init_keypad_layout()
 	qwerty_layout.shifted[KEY_SPACE] = ' ';
 	qwerty_layout.alternate[KEY_SPACE] = ' ';
 
-	qwerty_layout.normal[KEY_CENTER] = '\n';
-	qwerty_layout.shifted[KEY_CENTER] = '\n';
-	qwerty_layout.alternate[KEY_CENTER] = '\n';
-	
 	qwerty_layout.normal[KEY_END] = '';
 	qwerty_layout.shifted[KEY_END] = '';
 	qwerty_layout.alternate[KEY_END] = '';
@@ -314,9 +320,13 @@ init_keypad_layout()
 	qwerty_layout.shifted[KEY_0] = ')';
 	qwerty_layout.alternate[KEY_0] = '0';
 
-	qwerty_layout.normal[KEY_GRAVE] = '`';
-	qwerty_layout.shifted[KEY_GRAVE] = '~';
-	qwerty_layout.alternate[KEY_GRAVE] = '~';
+	qwerty_layout.normal[KEY_APOSTROPHE] = '`';
+	qwerty_layout.shifted[KEY_APOSTROPHE] = '~';
+	qwerty_layout.alternate[KEY_APOSTROPHE] = '~';
+
+	qwerty_layout.normal[KEY_ALTERASE] = CHAR_ESCAPE;
+	qwerty_layout.shifted[KEY_ALTERASE] = CHAR_ESCAPE;
+	qwerty_layout.alternate[KEY_ALTERASE] = CHAR_ESCAPE;		
 
 	qwerty_layout.normal[KEY_BACK] = CHAR_ESCAPE;
 	qwerty_layout.shifted[KEY_BACK] = CHAR_ESCAPE;
@@ -396,51 +406,18 @@ init_keypad_layout()
 		current_layout = &qwerty_layout;
 }
 
-static char**
-prepend_title(const char** headers) {
-    char tmp1[PATH_MAX];
-    char tmp2[PATH_MAX];
-    sprintf(tmp1, "|                         %s |", EXPAND(RECOVERY_VERSION));
-    sprintf(tmp2, "|                         safe system is: %s", safemode ? "  ENABLED |" : " DISABLED |");
-    char* title[] = { ".+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.", 
-		      "",
-                      "",
-		      "|,====================/\\____________________________|", 
-		       NULL
-                    };
-    
-    title[1] = strdup(tmp1);
-    title[2] = strdup(tmp2);
-
-    // count the number of lines in our title, plus the
-    // caller-provided headers.
-    int count = 0;
-    char** p;
-    for (p = title; *p; ++p, ++count);
-    for (p = headers; *p; ++p, ++count);
-    
-    
-    char** new_headers = malloc((count+1) * sizeof(char*));
-    char** h = new_headers;
-    for (p = title; *p; ++p, ++h) *h = *p;
-    for (p = headers; *p; ++p, ++h) *h = *p;
-    *h = NULL;
-
-    return new_headers;
-}
-
 void show_console_menu() {
     char tmp[PATH_MAX];               
     char** headers = NULL;
-    char* headers_con[] = {  "||    console menu    |/__________________________,/|",
-			     "||-+-+-+-+-+-+-+-+-+-+[[+-+-+-+-+-+-+-+-+-+-+-+-+-|/|",
-			     "||--------------------||--------------------------|/|",
-			     "|| OK+DEL   +==> EXIT ||   ALT/SHFT+UP/DN         |/|",
-			     "|| OK       +==> CTRL ||   +=> SCROLL/SCROLL x8   |/|",      
-                             "|| MIC      +===> ESC ||--------------------------|/|",
-			     "|| SEARCH   +==> HOME ||   OK+SHIFT/ALT           |/|",
-			     "|| POWER    +===> END ||   +=> CAPSLOCK/ALTLOCK   |/|",
-			     "||------------------------------------------------|/|", 
+    char* headers_con[] = {  "||   console menu   |//___________________________,/|",
+			     "||------------------||----------------------------|/|",
+			     "||------------------||----------------------------|/|",
+			     "|| OK+DEL  ==> EXIT ||    ALT/SHFT+UP/DN          |/|",
+			     "|| OK      ==> CTRL ||    ==> SCROLL/SCROLL x8    |/|", 
+			     "|| SYM     ===> ALT ||----------------------------|/|",
+			     "|| CAPSLOCK ==> ESC ||    OK+SHIFT/ALT            |/|",
+			     "|| POWER   ===> END ||    ==> CAPSLOCK/ALTLOCK    |/|",
+			     "||__________________||____________________________|/|", 
 			      NULL
     };
     headers = prepend_title((const char**)headers_con);
@@ -692,9 +669,9 @@ static int toggle_backlight(int past_alt_toggled, int past_shift_toggled, int al
 			switch (altzero_shiftone)
 			{
 			  case 0:
-			    altfd = fopen(ALT_BACKLIGHT_FILE, "w");
-                            fwrite("1", 1, 1, altfd);
-                            fclose(altfd);
+			    //altfd = fopen(ALT_BACKLIGHT_FILE, "w");
+                            //fwrite("1", 1, 1, altfd);
+                            //fclose(altfd);
 		 	    alt_status = 1;
 			    break;
 			  
@@ -711,9 +688,9 @@ static int toggle_backlight(int past_alt_toggled, int past_shift_toggled, int al
 		        switch (altzero_shiftone)
                         {
 			  case 0:
-                            altfd = fopen(ALT_BACKLIGHT_FILE, "w");
-                            fwrite("1", 1, 1, altfd);
-                            fclose(altfd);
+                            //altfd = fopen(ALT_BACKLIGHT_FILE, "w");
+                            //fwrite("1", 1, 1, altfd);
+                            //fclose(altfd);
                             alt_status = 1;
                             break;
 
@@ -729,9 +706,9 @@ static int toggle_backlight(int past_alt_toggled, int past_shift_toggled, int al
 			switch (altzero_shiftone)
 			{
 			  case 0:
-			    altfd = fopen(ALT_BACKLIGHT_FILE, "w");
-                            fwrite("0", 1, 1, altfd);
-                            fclose(altfd);
+			    //altfd = fopen(ALT_BACKLIGHT_FILE, "w");
+                            //fwrite("0", 1, 1, altfd);
+                            //fclose(altfd);
                             alt_status = 0;
                             break;
 
@@ -747,9 +724,9 @@ static int toggle_backlight(int past_alt_toggled, int past_shift_toggled, int al
 			switch (altzero_shiftone)
 			{
 			  case 0:
-                            altfd = fopen(ALT_BACKLIGHT_FILE, "w");
-                            fwrite("0", 1, 1, altfd);
-                            fclose(altfd);
+                            //altfd = fopen(ALT_BACKLIGHT_FILE, "w");
+                            //fwrite("0", 1, 1, altfd);
+                            //fclose(altfd);
                             alt_status = 0;
                             break;
 
@@ -889,7 +866,7 @@ int run_console(const char* command)
 	      // "OK" + alt + BACKSPACE --> forcibly terminate bash		
 	      //alt_state = getAltState(current_toggle_state);	
 	      //shift_state = getShiftState(current_toggle_state);	
-	      if (ui_key_pressed(KEY_CENTER))
+	      if (ui_key_pressed(KEY_REPLY))
 	      {
 				
 		   if (keycode==KEY_LEFTALT)
@@ -911,7 +888,7 @@ int run_console(const char* command)
 		   }	
 		   
 		   //ignore "OK"
-		   if (keycode == KEY_CENTER) 
+		   if (keycode == KEY_REPLY) 
 		   {
 		    continue;
 		   }

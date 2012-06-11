@@ -21,6 +21,9 @@
 
 #include <stdio.h>
 
+char* get_battery_level(void); 
+char** prepend_title(const char** headers);
+
 // Initialize the graphics system.
 void ui_init();
 unsigned char get_ext_color_pref(int color_type, char rgba); 
@@ -51,6 +54,7 @@ void ui_printlogtail(int nb_lines);
 
 void ui_reset_text_col();
 void ui_set_show_text(int value);
+void ui_set_showing_warning(int value); 
 
 // Display some header text followed by a menu of items, which appears
 // at the top of the screen (in place of any scrolling ui_print()

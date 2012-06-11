@@ -21,7 +21,7 @@
 #include "extendedcommands.h"
 
 char* MENU_HEADERS[] = { "||    main menu     |/____________________________,/|",
-		         "|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
+		         "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
 			  NULL
 		       };
 
@@ -87,7 +87,6 @@ int device_reboot_now(volatile char* key_pressed, int key_code) {
 int device_handle_key(int key_code) {
     
         switch (key_code) {
-            case KEY_CAPSLOCK:
             case KEY_DOWN:
             case KEY_VOLUMEDOWN:
             case KEY_MENU:
@@ -107,7 +106,7 @@ int device_handle_key(int key_code) {
             case KEY_LEFTBRACE:
             case KEY_ENTER:
             case BTN_MOUSE:
-            case KEY_CENTER:
+            case KEY_REPLY:
             case KEY_CAMERA:
             case KEY_F21:
             case KEY_SEND:
@@ -119,7 +118,7 @@ int device_handle_key(int key_code) {
                 if (ui_get_showing_back_button()) {
                     return SELECT_ITEM;
                 }
-                
+            case KEY_ALTERASE:    
             case KEY_BACK:
                 return GO_BACK;
 
@@ -158,6 +157,12 @@ int device_handle_key(int key_code) {
 
 	    case KEY_B:
 		return (SELECT_11-SELECT_OFFSET);
+	    
+	    case KEY_C:
+		return (SELECT_12-SELECT_OFFSET);
+	    
+	    case KEY_D:
+		return (SELECT_13-SELECT_OFFSET);
 
         }
     

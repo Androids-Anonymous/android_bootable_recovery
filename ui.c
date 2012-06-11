@@ -68,7 +68,10 @@ static int gShowBackButton = 0;
 #define CHAR_HEIGHT 18
 #define SELECTION_OFFSET 1 
 
-#define KEYBOARD_BACKLIGHT_FILE "/sys/class/leds/kpd_backlight_en/brightness"
+#define BATTERY_CAPACITY_FILE "/sys/class/power_supply/battery/charge_counter"
+#define BATTERY_STATUS_FILE "/sys/class/power_supply/battery/status"
+
+#define KEYBOARD_BACKLIGHT_FILE "/sys/class/leds/keyboard-backlight/brightness"
 
 #define PREFS_DIR "/cache/.safestrap/home/.prefs"
 #define ALREADY_CONFIRMED_FILE "/.already_confirmed"
@@ -177,6 +180,8 @@ color32 background_color = {.r = 0, .g = 0, .b = 0, .a = 160 };
 color32 menu_color = {.r = 60, .g = 255, .b = 110, .a = 255};
 color32 menu_sel_color = {.r = 255, .g = 255, .b = 255, .a = 255};
 color32 danger_color = {.r = 255, .g = 215, .b = 0, .a = 255};
+color32 battery_color = {.r = 0, .g = 255, .b = 0, .a = 255};
+color32 status_color = {.r = 0, .g = 255, .b = 0, .a = 255};
 
 // Log text overlay, displayed when a magic key is pressed
 static char text[MAX_ROWS][MAX_COLS];
@@ -184,6 +189,7 @@ static int text_cols = 0, text_rows = 0;
 static int text_col = 0, text_row = 0, text_top = 0;
 static int show_text = 0;
 static int show_text_ever = 0; // has show_text ever been 1?
+static int showing_warning = 0;
 
 static char menu[MENU_MAX_ROWS][MENU_MAX_COLS];
 static int show_menu = 0;
@@ -252,6 +258,71 @@ unsigned fast = 0;
 unsigned keyheld = 0;
 int last_code = 0;
 
+char* get_battery_status(void) {
+    FILE* bs_fd;
+    struct stat bs_info;
+    //char *bs_charsin = calloc(3,sizeof(char));
+    char bs_charsin[PATH_MAX];
+
+    if (!(stat(BATTERY_STATUS_FILE, &bs_info)))
+    {
+    	bs_fd = fopen(BATTERY_STATUS_FILE, "r");
+	char *result = fgets(bs_charsin, sizeof(bs_charsin), bs_fd);
+	if(result != NULL)
+	{
+	    bs_charsin[strlen(bs_charsin) - 1] = '\0';
+	    fclose(bs_fd);
+	}
+	else
+	{
+	    fprintf(stderr,"g_b_s: error: result was NULL\n");
+	    fclose(bs_fd);
+	    return "???";
+	}
+    } 
+    else 
+    {
+        fprintf(stderr,"g_b_s: error: couldn't stat battery STATUS file\n");
+    }
+    
+    fprintf(stderr,"g_b_s: bs_charsin = \"%s\"\n", bs_charsin);
+    
+    char* bs_charsin_p = strdup(bs_charsin);
+    return bs_charsin_p;
+}
+
+char* get_battery_level(void) {
+    FILE* batt_fd;
+    struct stat batt_info;
+    //char *batt_charsin = calloc(3,sizeof(char));
+    char batt_charsin[PATH_MAX];
+
+    if (!(stat(BATTERY_CAPACITY_FILE, &batt_info)))
+    {
+    	batt_fd = fopen(BATTERY_CAPACITY_FILE, "r");
+	char *result = fgets(batt_charsin, sizeof(batt_charsin), batt_fd);
+	if(result != NULL)
+	{
+	    batt_charsin[strlen(batt_charsin)] = '\0';
+	    fclose(batt_fd);
+	}
+	else
+	{
+	    fprintf(stderr,"g_b_l: error: result was NULL\n");
+	    fclose(batt_fd);
+	    return "???";
+	}
+    } 
+    else 
+    {
+        fprintf(stderr,"g_b_l: error: couldn't stat battery capacity file\n");
+    }
+    
+    fprintf(stderr,"g_b_l: batt_charsin = \"%s\"\n", batt_charsin);
+    
+    char* batt_charsin_p = strdup(batt_charsin);
+    return batt_charsin_p;
+}
 
 int
 set_already_confirmed_prefs(int ac_set)
@@ -697,6 +768,221 @@ draw_text_line(int row, const char* t, int offset) {
     gr_text((offset*CHAR_WIDTH), (row+1)*CHAR_HEIGHT-1, t);
   }
 }
+						   
+static void
+draw_warning_skulls(void) {
+ 	
+  char* layer1[]={"       ___ (  )(  )             (  )(  ) ___       ",
+		  "      /   \\_\\ \\/ /               \\ \\/ /_/   \\      ",
+		  "     |      ]\\ \\/                 \\/ /[      |     ",
+		  "     |      ]/\\ \\                 / /\\[_     |     ",
+		  "      \\___/ / /\\ \\               / /\\ \\ \\___/      ",
+		  "           (  )(  )             (  )(  )           ",
+		  NULL                                                       };
+  char line0a[]=  "            ^`  ^`               ^`  ^`";
+  char line2a[]=  "          _                            _";
+  char line3a[]=  "           _                          _";
+  char line5a[]=  "            _.  ._               _.  ._";
+  
+  char* layer2[]={"         x                              x",
+		  "         x                              x",
+		  NULL                                       };
+  
+  int i;
+  
+  gr_color(255, 255, 255, 255);
+  for(i=0; i<6; i++)
+  {
+    gr_text((CHAR_WIDTH+1), ((i+8)*CHAR_HEIGHT+1), layer1[i]);
+  }
+
+  gr_color(105, 105, 105, 255);
+  gr_text((CHAR_WIDTH+1), (8*CHAR_HEIGHT)+1, line0a);
+  gr_text((CHAR_WIDTH+1), (10*CHAR_HEIGHT+1), line2a);
+  gr_text((CHAR_WIDTH+1), (11*CHAR_HEIGHT+1), line3a);
+  gr_text((CHAR_WIDTH+1), (13*CHAR_HEIGHT+1), line5a);
+
+  gr_color(235, 5, 15, 255);
+  for(i=2; i<4; i++)
+  {
+    gr_text((CHAR_WIDTH+1), (i+8)*CHAR_HEIGHT+1, layer2[i-2]);
+  }
+}
+
+static void
+draw_safe_status(void) {
+  
+  char* status;
+  int red;
+  int green;
+  int blue; 
+  char enabled[]= " ENABLED";
+  char disabled[]="DISABLED";
+  char line[]="                             |";
+  int safemode=get_safe_mode();
+
+  if(safemode)
+  {
+    status_color.r = 0;
+    status_color.g = 255;
+    status_color.b = 127;
+    status_color.a = 255;
+    status=enabled;
+    
+    gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
+    if (line[0] != '\0') {
+      gr_text((23*CHAR_WIDTH+1), (3)*CHAR_HEIGHT, line);
+    }
+  }
+  else
+  {
+    status_color.r = 235;
+    status_color.g = 5;
+    status_color.b = 15;
+    status_color.a = 255;
+    status=disabled;
+    
+    gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
+    if (line[0] != '\0') {
+      gr_text((23*CHAR_WIDTH+1), (3)*CHAR_HEIGHT, line);
+    }
+  }
+  
+  gr_color(status_color.r, status_color.g, status_color.b, status_color.a);
+  if (status[0] != '\0') {
+    gr_text((42*CHAR_WIDTH+1), (3)*CHAR_HEIGHT-1, status);
+  }
+}
+
+static void
+draw_battery_status(const char* status) {
+  
+  int red;
+  int green;
+  int blue;  
+  
+  char charging[]="Charging";  
+  char discharging[]="Discharging";  
+  char full[]="Full";  
+  char unknown[]="Unknown";
+  char* parsed;  
+
+  if(strlen(status))  
+  {
+    if(!strncmp(status,full,strlen(status)))
+    {
+      red = 0;
+      green = 255;
+      blue = 127;
+      parsed = "fully charged";
+    }
+    else if(!strncmp(status,charging,strlen(status)))
+    {
+      red = 0;
+      green = 255;
+      blue = 127;
+      parsed = "charging";
+    }
+    else if(!strncmp(status,discharging,strlen(status)))
+    {
+      red = 0;
+      green = 255;
+      blue = 127;
+      parsed = "discharging";
+    }
+    else if(!strncmp(status,unknown,strlen(status)))
+    {
+      red = 235;
+      green = 215;
+      blue = 0;
+      parsed = "unknown";
+    }
+    else
+    {
+      red = 235;
+      green = 215;
+      blue = 0;
+      parsed = "? ? ? ? ? ?";
+    }
+  }
+  
+  battery_color.r = red;
+  battery_color.g = green;
+  battery_color.b = blue;
+  battery_color.a = 255;
+  
+  gr_color(battery_color.r, battery_color.g, battery_color.b, battery_color.a);
+  if (parsed[0] != '\0') {
+    gr_text((3*CHAR_WIDTH+1), (3)*CHAR_HEIGHT+7, parsed);
+  }
+}
+
+static void
+draw_battery_level(const char* level) {
+ 
+  int level_length = strlen(level);
+ 
+  int red;
+  int green;
+  int blue;  
+  char level_text[5];
+
+  int number=atoi(level);  
+
+  if((number <= 30))
+  { 
+    red = 235;
+    green = 5;
+    blue = 15;
+  }
+  if((number > 30) && (number < 70))
+  { 
+    red = 255;
+    green = 215;
+    blue = 0;
+  }
+  if((number >= 70))
+  { 
+    red = 0;
+    green = 255;
+    blue = 127;
+  }
+  
+  if(!show_text)
+  {
+    red = 0;
+    green = 0;
+    blue = 0;
+  }  
+  
+  battery_color.r = red;
+  battery_color.g = green;
+  battery_color.b = blue;
+  battery_color.a = 255;
+
+  if(number)
+  {
+    sprintf(level_text,"%d%%",number); 
+  }
+  else
+  {
+    sprintf(level_text,"???%%");
+  }
+
+  gr_color(battery_color.r, battery_color.g, battery_color.b, battery_color.a);
+  
+  if (level[0] != '\0')
+  {
+    if((level_length == 3) || (!number))
+    {
+      gr_text((12*CHAR_WIDTH), (2)*CHAR_HEIGHT, level_text);
+    }
+    else if(level_length == 2)
+    {
+      gr_text((13*CHAR_WIDTH), (2)*CHAR_HEIGHT, level_text);
+    }
+  }
+}
 
 static void
 draw_console_cursor(int row, int column, char letter)
@@ -887,7 +1173,27 @@ static void draw_screen_locked(void)
 
                 row++;
             }
+	    // line across the bottom of the menu, underneath BACK
             gr_fill(5, row*CHAR_HEIGHT+1, (gr_fb_width()-((3*CHAR_WIDTH)+2)), row*CHAR_HEIGHT+2);
+	    
+	    char* bat_level = get_battery_level();
+	    char* bat_status = get_battery_status();
+	    
+	    // don't want to draw the battery stats over the warning screen,
+	    // doesn't look very nice
+	    if(!showing_warning)
+	    {
+	        draw_safe_status();
+		draw_battery_level(bat_level);
+	        draw_battery_status(bat_status);
+            	// line across the top of the menu
+		if(get_safe_mode()){
+		    gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
+		} else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);  
+	    	gr_fill((1*CHAR_WIDTH+4), 0, (gr_fb_width()-((2*CHAR_WIDTH)-2)), 1);
+	    }
+	    else
+		draw_warning_skulls();
         }
         if(get_safe_mode()){
             gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
@@ -896,6 +1202,7 @@ static void draw_screen_locked(void)
 	for (; row < text_rows; ++row) {
             draw_text_line(row, text[(row+text_top) % text_rows], 0);
         }
+
     }
 }
 
@@ -997,7 +1304,7 @@ input_thread (void *cookie)
 			    keyheld_count = FAST_COUNT;
 			    fast = 1;
 	 	    }
-		    int repeat = ev_get(&ev, 0, keyheld, fast);
+		    int repeat = ev_get_input(&ev, 0, keyheld, fast);
 		    // A return value of 1 means the last key should be repeated
 		    if (repeat != 1)
 		    {
@@ -1009,7 +1316,7 @@ input_thread (void *cookie)
 			// Check for an up/down key press
 			if (ev.type == EV_KEY && ev.value == 1 ) {
 			// Don't want these keys to be repeatable
-			  if ((ev.code != KEY_CENTER) && (ev.code != KEY_SEARCH) && (ev.code != KEY_END) && (ev.code != KEY_LEFTALT) && (ev.code != KEY_LEFTSHIFT) && (ev.code != KEY_ENTER))
+			  if ((ev.code != KEY_REPLY) && (ev.code != KEY_SEARCH) && (ev.code != KEY_END) && (ev.code != KEY_LEFTALT) && (ev.code != KEY_LEFTSHIFT) && (ev.code != KEY_ENTER))
 			  {
 	                        keyheld = 1;
 				last_code = ev.code;
@@ -1037,7 +1344,7 @@ input_thread (void *cookie)
 		    } else
 		    { 
 			// Don't want to have fast mode kick in while scrolling the menu/selecting entries
-			if ((keyheld) && (ev.code != KEY_ENTER) && (ev.code != KEY_CENTER) && (ev.code != KEY_END))
+			if ((keyheld) && (ev.code != KEY_ENTER) && (ev.code != KEY_REPLY) && (ev.code != KEY_END))
 			{
 				keyheld_count++;
 				if (keyheld_count >= FAST_COUNT)
@@ -1049,7 +1356,7 @@ input_thread (void *cookie)
 			
 			ev.type = EV_KEY;
 			
-			if ((ev.code != KEY_CENTER) && (ev.code != KEY_SEARCH) && (ev.code != KEY_END)) {
+			if ((ev.code != KEY_REPLY) && (ev.code != KEY_SEARCH) && (ev.code != KEY_END)) {
 			     ev.code = last_code;
 			     ev.value = 1;
 			}
@@ -1112,6 +1419,11 @@ void ui_init(void)
     gr_init();
     ev_init();
     set_color_change(1);
+    
+    //enable keyboard backlight
+    FILE* keyboardfd = fopen(KEYBOARD_BACKLIGHT_FILE, "w");
+    fwrite("55", 1, 1, keyboardfd);
+    fclose(keyboardfd);
 
     text_col = text_row = 0;
     text_rows = gr_fb_height() / CHAR_HEIGHT;
@@ -1462,6 +1774,10 @@ void ui_set_show_text(int value) {
     show_text = value;
 }
 
+void ui_set_showing_warning(int value) {
+    showing_warning = value;
+}
+
 void ui_set_showing_back_button(int showBackButton) {
     gShowBackButton = showBackButton;
 }
@@ -1479,11 +1795,9 @@ void ui_console_begin()
 {
 	//enable keyboard backlight
     	FILE* keyboardfd = fopen(KEYBOARD_BACKLIGHT_FILE, "w");
-    	fwrite("1", 1, 1, keyboardfd);
+    	fwrite("125", 1, 1, keyboardfd);
     	fclose(keyboardfd);
         
-	//check to see if usb is connected, output results to log
-	usb_connected();	
 	pthread_mutex_lock(&gUpdateMutex);
 	show_console = 1;
 	console_refresh = 1;
@@ -1532,7 +1846,7 @@ void ui_console_end()
 {
 	//disable keyboard backlight
     	FILE* keyboardfd = fopen(KEYBOARD_BACKLIGHT_FILE, "w");
-    	fwrite("0", 1, 1, keyboardfd);
+    	fwrite("55", 1, 1, keyboardfd);
     	fclose(keyboardfd);
 	
 	pthread_mutex_lock(&gUpdateMutex);

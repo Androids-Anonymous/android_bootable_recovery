@@ -83,6 +83,8 @@ int device_wipe_data();
 #define SELECT_9	    1109
 #define SELECT_10	    1110
 #define SELECT_11	    1111
+#define SELECT_12	    1112
+#define SELECT_13	    1113
 #define SELECT_OFFSET	    1100
 
 #define ITEM_SAFEBOOT        0
