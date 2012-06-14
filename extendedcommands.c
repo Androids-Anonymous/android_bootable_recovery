@@ -1704,6 +1704,7 @@ void show_advanced_menu(int safemode_enabled)
 
     headers = prepend_title((const char**)headers_advdbg);
     ui_set_showing_warning(0);
+    ui_set_showing_advanced_menu_ns(1);
 
     for (;;)
     {
@@ -1711,6 +1712,7 @@ void show_advanced_menu(int safemode_enabled)
 	if (chosen_item == GO_BACK)
     	{
 	    ui_set_showing_warning(0);
+    	    ui_set_showing_advanced_menu_ns(0);
             return;
 	}
         switch (chosen_item)
@@ -1740,6 +1742,7 @@ void show_advanced_menu(int safemode_enabled)
                 }
                 while (action != GO_BACK);
 	    	ui_set_showing_warning(0);
+    	        ui_set_showing_advanced_menu_ns(0);
                 break;
             } 
             
@@ -1756,9 +1759,13 @@ void show_advanced_menu(int safemode_enabled)
  
 		if (confirm_selection( confirm_wipe, confirm_bat)){
             	    ui_set_showing_warning(0);
+    	            ui_set_showing_advanced_menu_ns(0);
                     wipe_battery_stats();
-		} else ui_set_showing_warning(0);
-
+		} else 
+		{ 
+			ui_set_showing_warning(0);
+    	                ui_set_showing_advanced_menu_ns(0);
+		}
                 break;
             }
             
@@ -1769,6 +1776,7 @@ void show_advanced_menu(int safemode_enabled)
                 ui_print("fixing permissions...\n");
                 __system("fix_permissions");
                 ui_print("done.\n");
+    	        ui_set_showing_advanced_menu_ns(0);
                 break;
             } 
             
@@ -1803,7 +1811,7 @@ void show_advanced_menu(int safemode_enabled)
 					 };
 		ext_headers = prepend_title((const char**)ext_headers_b);
 		swap_headers = prepend_title((const char**)swap_headers_b);
-
+    	        ui_set_showing_advanced_menu_ns(0);
                 int ext_size = get_menu_selection(ext_headers, ext_sizes, 0, 0, 0, 0);
                 if (ext_size == GO_BACK)
                     continue;
@@ -1860,7 +1868,7 @@ void show_advanced_menu(int safemode_enabled)
 					 };
 		dat_headers = prepend_title((const char**)dat_headers_b);
 		swap_headers = prepend_title((const char**)swap_headers_b);
-
+    	        ui_set_showing_advanced_menu_ns(0);
                 int dat_size = get_menu_selection(dat_headers, dat_sizes, 0, 0, 0, 0);
                 if (dat_size == GO_BACK)
                     continue;
@@ -1896,6 +1904,7 @@ void show_advanced_menu(int safemode_enabled)
 	
 		char confirm_sd[MENU_HEADER_COLS] = "|| <8> yes - install .zip to non-safe partition   |/|";
 
+    	        ui_set_showing_advanced_menu_ns(0);
 	        if (confirm_selection( confirm_install, confirm_sd ))
 		{ 
 		    const char* confirm_sure[] = {   
@@ -1915,11 +1924,13 @@ void show_advanced_menu(int safemode_enabled)
 		    } else
 		    {
 			ui_set_showing_warning(0);
+    	        	ui_set_showing_advanced_menu_ns(0);
 			set_flash_non_safe(0);
 		    }
 		} else 
 		{
 		    ui_set_showing_warning(0);
+    	            ui_set_showing_advanced_menu_ns(0);
 		    set_flash_non_safe(0);
 		}
 	    break;

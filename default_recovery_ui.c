@@ -73,7 +73,7 @@ char* MENU_ITEMS_SAFE[] = {     "|| <1> safe-boot menu                          
 #endif
 #endif
 #endif
-//				"|| <8> update/patch non-safe system (DANGEROUS)   |/|",
+				"|| <8> update/patch non-safe system               |/|",
                            	NULL };
 
 int device_recovery_start() {

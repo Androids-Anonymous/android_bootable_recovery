@@ -55,6 +55,7 @@ void ui_printlogtail(int nb_lines);
 void ui_reset_text_col();
 void ui_set_show_text(int value);
 void ui_set_showing_warning(int value); 
+void ui_set_showing_advanced_menu_ns(int value); 
 
 // Display some header text followed by a menu of items, which appears
 // at the top of the screen (in place of any scrolling ui_print()

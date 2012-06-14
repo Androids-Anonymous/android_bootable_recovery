@@ -190,6 +190,7 @@ static int text_col = 0, text_row = 0, text_top = 0;
 static int show_text = 0;
 static int show_text_ever = 0; // has show_text ever been 1?
 static int showing_warning = 0;
+static int showing_advanced_ns = 0;
 
 static char menu[MENU_MAX_ROWS][MENU_MAX_COLS];
 static int show_menu = 0;
@@ -856,6 +857,18 @@ draw_safe_status(void) {
 }
 
 static void
+draw_important_text(const char* text, int row_start, int column_start, unsigned char red, unsigned char green, unsigned char blue) {
+  
+  if(strlen(text))  
+  {
+    gr_color(red, green, blue, 255);
+    if (text[0] != '\0') {
+      gr_text(((row_start)*CHAR_WIDTH), ((column_start)*CHAR_HEIGHT), text);
+    } 
+  }
+}
+
+static void
 draw_battery_status(const char* status) {
   
   unsigned char red;
@@ -1208,6 +1221,11 @@ static void draw_screen_locked(void)
 		    gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
 		} else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);  
 	    	gr_fill((1*CHAR_WIDTH+4), 0, (gr_fb_width()-((2*CHAR_WIDTH)-2)), 1);
+		if(!safemode){
+		  if(showing_advanced_ns){
+		    draw_important_text("(DANGEROUS)",36,14,235,5,15); 	
+		  }
+		}
 	    }
 	    else
 		draw_warning_skulls();
@@ -1793,6 +1811,10 @@ void ui_set_show_text(int value) {
 
 void ui_set_showing_warning(int value) {
     showing_warning = value;
+}
+
+void ui_set_showing_advanced_menu_ns(int value) {
+    showing_advanced_ns = value;
 }
 
 void ui_set_showing_back_button(int showBackButton) {
