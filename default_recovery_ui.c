@@ -73,7 +73,7 @@ char* MENU_ITEMS_SAFE[] = {     "|| <1> safe-boot menu                          
 #endif
 #endif
 #endif
-				"|| <8> update/patch non-safe system (DANGEROUS)   |/|",
+//				"|| <8> update/patch non-safe system (DANGEROUS)   |/|",
                            	NULL };
 
 int device_recovery_start() {
@@ -163,6 +163,9 @@ int device_handle_key(int key_code) {
 	    
 	    case KEY_D:
 		return (SELECT_13-SELECT_OFFSET);
+	    
+	    case KEY_E:
+		return (SELECT_14-SELECT_OFFSET);
 
         }
     

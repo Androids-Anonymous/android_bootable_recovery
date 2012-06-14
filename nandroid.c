@@ -43,6 +43,8 @@
 #include "flashutils/flashutils.h"
 #include <libgen.h>
 
+int safemode;
+
 void nandroid_generate_timestamp_path(const char* backup_path, const char* sdcard_path)
 {
     time_t t = time(NULL);

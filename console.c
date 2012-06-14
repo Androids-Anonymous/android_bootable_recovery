@@ -785,8 +785,9 @@ int run_console(const char* command)
 	{
 	    char tmp_backup_cmd[PATH_MAX];
 	    ensure_path_mounted("/emmc");
-	    sprintf(tmp_backup_cmd,"/sbin/busybox tar xzf %s -C /cache",SS_HOMEFILES);
+	    sprintf(tmp_backup_cmd,"/sbin/busybox tar xzf %s -C /cache;",SS_HOMEFILES);
 	    __system(tmp_backup_cmd);
+	    sync();
 	}
 
 	int childfd = create_subprocess("/sbin/bash", "--init-file", BASH_RC_FILE, &child);

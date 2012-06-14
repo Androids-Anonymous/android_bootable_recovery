@@ -65,12 +65,24 @@ int check_systemorig_mount() {
 }
 
 int get_safe_mode() {
-    int result =0;
+    int result = 0;
+    char cmd[256];
     if (check_systemorig_mount()) {
        struct statfs info;
-       if (0 == statfs(SAFE_SYSTEM_FILE, &info))
+       struct statfs info2;
+       if (0 == statfs(SAFE_SYSTEM_FILE, &info)){
 	   result = 1;
+           if (statfs(DUPE_SAFE_SYSTEM_FILE, &info2)){
+             sprintf(cmd, "touch %s", DUPE_SAFE_SYSTEM_FILE);
+	   }
+       }
+       else {
+           if (0 == statfs(DUPE_SAFE_SYSTEM_FILE, &info2)){
+           sprintf(cmd, "rm %s", DUPE_SAFE_SYSTEM_FILE);
+	   }
+       }
     }
+    __system(cmd);
     return result;
 }
 

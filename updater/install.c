@@ -68,7 +68,7 @@ int check_systemorig_mount() {
     }
     const MountedVolume* mv = find_mounted_volume_by_mount_point("/systemorig");
     if (mv == NULL) {
-        system("mount /dev/block/systemorig /systemorig");
+        system("mount /systemorig");
         result = scan_mounted_volumes();
         if (result < 0) {
             return 0;
@@ -83,12 +83,9 @@ int check_systemorig_mount() {
 
 int get_safe_mode() {
     int result = 0;
-    if (check_systemorig_mount()) {
-       struct statfs info;
-       if (0 == statfs(SAFE_SYSTEM_FILE, &info))
-           result = 1;
-    }
-    system("umount /systemorig");
+    struct statfs info;
+    if (0 == statfs(DUPE_SAFE_SYSTEM_FILE, &info))
+      result = 1;
     return result;
 }
 
@@ -112,7 +109,7 @@ allow_flash_non_safe()
     return flash_non_safe;
 }
 
-int safe_mode;
+int safemode;
 
 // mount(fs_type, partition_type, location, mount_point)
 //
@@ -127,7 +124,7 @@ Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* partition_type;
     char* location;
     char* mount_point;
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
  
     if (ReadArgs(state, argv, 4, &fs_type, &partition_type,
                  &location, &mount_point) < 0) {
@@ -159,7 +156,7 @@ Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
     // wants to alter /system, then:
     // 1: attempt to backup safestrap files to the internal sdcard
     // 2: swap it to /systemorig
-    else if (!(safe_mode) && !(strcmp(mount_point,"/system")) && (allow_flash_non_safe()))
+    if (!(safemode) && !(strcmp(mount_point,"/system")) && (allow_flash_non_safe()))
     {
 	mount_point = strdup("/systemorig");
     }
@@ -205,7 +202,7 @@ done:
 // is_mounted(mount_point)
 Value* IsMountedFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     if (argc != 1) {
         return ErrorAbort(state, "%s() expects 1 arg, got %d", name, argc);
     }
@@ -219,7 +216,7 @@ Value* IsMountedFn(const char* name, State* state, int argc, Expr* argv[]) {
     }
     // if in non-safe mode, non-safe flashing is allowed and we want to check
     // if /system is mounted, then make sure we're checking /systemorig
-    else if ( (!(safe_mode) ) && (!(strcmp(mount_point,"/system"))) && (allow_flash_non_safe()) )
+    if ( (!(safemode) ) && (!(strcmp(mount_point,"/system"))) && (allow_flash_non_safe()) )
     {
 	mount_point = strdup("/systemorig");
     }
@@ -239,7 +236,7 @@ done:
 
 Value* UnmountFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     if (argc != 1) {
         return ErrorAbort(state, "%s() expects 1 arg, got %d", name, argc);
     }
@@ -252,7 +249,7 @@ Value* UnmountFn(const char* name, State* state, int argc, Expr* argv[]) {
         goto done;
     }
     // make sure we unmount /systemorig if in non-safe mode
-    else if ( (!(safe_mode) ) && (!(strcmp(mount_point,"/system"))) && (allow_flash_non_safe()) )
+    if ( (!(safemode) ) && (!(strcmp(mount_point,"/system"))) && (allow_flash_non_safe()) )
     {
 	mount_point = strdup("/systemorig");
     }
@@ -278,7 +275,7 @@ done:
 //    fs_type="ext4"   partition_type="EMMC"    location=device
 Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     if (argc != 3) {
         return ErrorAbort(state, "%s() expects 3 args, got %d", name, argc);
     }
@@ -379,7 +376,7 @@ done:
 
 Value* DeleteFn(const char* name, State* state, int argc, Expr* argv[]) {
     char** paths = malloc(argc * sizeof(char*));
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     int i;
     int paths_count;
     int success = 0;
@@ -396,7 +393,7 @@ Value* DeleteFn(const char* name, State* state, int argc, Expr* argv[]) {
 	    }
     }
 
-    switch(safe_mode)
+    switch(safemode)
     {
 	case 0:
 	{
@@ -512,7 +509,7 @@ Value* PackageExtractDirFn(const char* name, State* state,
     if (argc != 2) {
         return ErrorAbort(state, "%s() expects 2 args, got %d", name, argc);
     }
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     char* zip_path;
     char* dest_path;
     char dest_copy[PATH_MAX];
@@ -522,7 +519,7 @@ Value* PackageExtractDirFn(const char* name, State* state,
     {
         return ErrorAbort(state, "dest_path argument to %s() can't be empty", name);
     }
-    else if ( !(safe_mode ) && !(strcmp(dest_path,"/system")) && allow_flash_non_safe())
+    else if ( !(safemode ) && !(strcmp(dest_path,"/system")) && allow_flash_non_safe())
     {
      	strcpy(dest_copy, dest_path);
 	if(strlen(dest_copy))
@@ -548,7 +545,7 @@ Value* PackageExtractDirFn(const char* name, State* state,
     // To create a consistent system image, never use the clock for timestamps.
     struct utimbuf timestamp = { 1217592000, 1217592000 };  // 8/1/2008 default
     bool success;
-    if((safe_mode))
+    if((safemode))
     {
         success = mzExtractRecursive(za, zip_path, dest_path, MZ_EXTRACT_FILES_ONLY, &timestamp, NULL, NULL);
     }
@@ -568,7 +565,7 @@ Value* PackageExtractDirFn(const char* name, State* state,
 //   function (the char* returned is actually a FileContents*).
 Value* PackageExtractFileFn(const char* name, State* state,
                            int argc, Expr* argv[]) {
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     char dest_copy[PATH_MAX];
     if (argc != 1 && argc != 2) {
         return ErrorAbort(state, "%s() expects 1 or 2 args, got %d",
@@ -586,7 +583,7 @@ Value* PackageExtractFileFn(const char* name, State* state,
     	{
             return ErrorAbort(state, "dest_path argument to %s() can't be empty", name);
     	}
-    	else if ( !(safe_mode ) && !(strcmp(dest_path,"/system")) && allow_flash_non_safe())
+    	else if ( !(safemode ) && !(strcmp(dest_path,"/system")) && allow_flash_non_safe())
     	{
      	    strcpy(dest_copy, dest_path);
 	    if(strlen(dest_copy))
@@ -611,7 +608,7 @@ Value* PackageExtractFileFn(const char* name, State* state,
             goto done2;
         }
 	FILE* f = NULL;
-        if((safe_mode))
+        if((safemode))
 	{
 	    f = fopen(dest_path, "wb");
 	    if (f == NULL) {
@@ -683,8 +680,8 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (argc == 0) {
         return ErrorAbort(state, "%s() expects 1+ args, got %d", name, argc);
     }
-    safe_mode = get_safe_mode();
-    fprintf(stderr,"SymlinkFn: safe_mode is \"%d\"\n",safe_mode);
+    safemode = get_safe_mode();
+    fprintf(stderr,"SymlinkFn: safemode is \"%d\"\n",safemode);
     char* target;
     char target_copy[PATH_MAX];
     target = Evaluate(state, argv[0]);
@@ -699,7 +696,7 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
     int srcs_count;
     char srcs_copy[argc][PATH_MAX];
 
-    switch (safe_mode)
+    switch (safemode)
     {
 	case 0:
 	{
@@ -782,7 +779,7 @@ Value* SymlinkFn(const char* name, State* state, int argc, Expr* argv[]) {
 
 Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     bool recursive = (strcmp(name, "set_perm_recursive") == 0);
     
     int min_args = 4 + (recursive ? 1 : 0);
@@ -825,7 +822,7 @@ Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
         }
 
         
-	switch (safe_mode)
+	switch (safemode)
 	{
 	    case 0:
 	    {
@@ -872,7 +869,7 @@ Value* SetPermFn(const char* name, State* state, int argc, Expr* argv[]) {
             goto done;
         }
 	
-	switch (safe_mode)
+	switch (safemode)
 	{
 	    case 0:
 	    {
@@ -936,7 +933,7 @@ Value* GetPropFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (argc != 1) {
         return ErrorAbort(state, "%s() expects 1 arg, got %d", name, argc);
     }
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     char* key;
     key = Evaluate(state, argv[0]);
     if (key == NULL) return NULL;
@@ -1058,7 +1055,7 @@ static bool write_raw_image_cb(const unsigned char* data,
 
 // write_raw_image(file, partition)
 Value* WriteRawImageFn(const char* name, State* state, int argc, Expr* argv[]) {
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     char* result = NULL;
     char* partition;
     char* filename;
@@ -1076,7 +1073,7 @@ Value* WriteRawImageFn(const char* name, State* state, int argc, Expr* argv[]) {
     }
     if (strlen(partition))
     {
-	if ( (!(safe_mode)) && (!strncmp(partition,"/system",(7*sizeof(char)))) && allow_flash_non_safe() )
+	if ( (!(safemode)) && (!strncmp(partition,"/system",(7*sizeof(char)))) && allow_flash_non_safe() )
         {
 	    partition = strdup("/systemorig");
         }
@@ -1253,7 +1250,7 @@ Value* RunProgramFn(const char* name, State* state, int argc, Expr* argv[]) {
     if (args == NULL) {
         return NULL;
     }
-    safe_mode = get_safe_mode();
+    safemode = get_safe_mode();
     char** args2 = malloc(sizeof(char*) * (argc+1));
     memcpy(args2, args, sizeof(char*) * argc);
     args2[argc] = NULL;
@@ -1265,7 +1262,7 @@ Value* RunProgramFn(const char* name, State* state, int argc, Expr* argv[]) {
     {
 	
         
-	if ( !(safe_mode ) && !(strncmp(args2[arg_count],"/system",(7*sizeof(char)))) && strncmp(args2[arg_count],"/systemorig",(11*sizeof(char))) && allow_flash_non_safe())
+	if ( !(safemode ) && !(strncmp(args2[arg_count],"/system",(7*sizeof(char)))) && strncmp(args2[arg_count],"/systemorig",(11*sizeof(char))) && allow_flash_non_safe())
 	{
 	    strncpy(args2_copy[arg_count],args2[arg_count],strlen(args2[arg_count]));
 	    if(arg_count == 0)
@@ -1288,7 +1285,7 @@ Value* RunProgramFn(const char* name, State* state, int argc, Expr* argv[]) {
     
     pid_t child = fork();
     
-    if( !(safe_mode) && allow_flash_non_safe() )
+    if( !(safemode) && allow_flash_non_safe() )
     {
 	fprintf(stderr, "about to run program [%s], argc = %d (includes [%s])\n", args2_copy[0], argc, args2_copy[0]);
 	if (child == 0)

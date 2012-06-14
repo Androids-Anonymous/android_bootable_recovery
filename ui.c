@@ -177,7 +177,7 @@ static int gPagesIdentical = 0;
 
 //colors
 color32 background_color = {.r = 0, .g = 0, .b = 0, .a = 160 };
-color32 menu_color = {.r = 60, .g = 255, .b = 110, .a = 255};
+color32 menu_color = {.r = 50, .g = 205, .b = 50, .a = 255};
 color32 menu_sel_color = {.r = 255, .g = 255, .b = 255, .a = 255};
 color32 danger_color = {.r = 255, .g = 215, .b = 0, .a = 255};
 color32 battery_color = {.r = 0, .g = 255, .b = 0, .a = 255};
@@ -424,8 +424,9 @@ int ensure_prefs_exist()
     if (stat(PREFS_DIR, &prefs_info))
     {
 	ensure_path_mounted("/emmc");
-	system("/sbin/busybox tar xf /emmc/safestrap/.ss_homefiles.tar -C /");
-	ensure_path_unmounted("/emmc");
+	ensure_path_mounted("/cache");
+	system("/sbin/busybox tar xzf /emmc/safestrap/.ss_homefiles.tar.gz -C /cache");
+	sync();
     }
     return 0;
 }
@@ -780,12 +781,12 @@ draw_warning_skulls(void) {
 		  "           (  )(  )             (  )(  )           ",
 		  NULL                                                       };
   char line0a[]=  "            ^`  ^`               ^`  ^`";
-  char line2a[]=  "          _                            _";
-  char line3a[]=  "           _                          _";
+  char line2a[]=  "          _                             _";
+  char line3a[]=  "           _                           _";
   char line5a[]=  "            _.  ._               _.  ._";
   
-  char* layer2[]={"         x                              x",
-		  "         x                              x",
+  char* layer2[]={"         x                               x",
+		  "         x                               x",
 		  NULL                                       };
   
   int i;
@@ -816,10 +817,10 @@ draw_safe_status(void) {
   int red;
   int green;
   int blue; 
-  char enabled[]= " ENABLED";
-  char disabled[]="DISABLED";
-  char line[]="                             |";
-  int safemode=get_safe_mode();
+  char enabled[]  = " ENABLED";
+  char disabled[] = "DISABLED";
+  char line[]     = "                             |";
+  int safemode    = get_safe_mode();
 
   if(safemode)
   {
@@ -857,16 +858,17 @@ draw_safe_status(void) {
 static void
 draw_battery_status(const char* status) {
   
-  int red;
-  int green;
-  int blue;  
+  unsigned char red;
+  unsigned char green;
+  unsigned char blue;  
   
   char charging[]="Charging";  
   char discharging[]="Discharging";  
   char full[]="Full";  
   char unknown[]="Unknown";
-  char* parsed;  
-
+  char* parsed;
+  
+  int safemode = get_safe_mode(); 
   if(strlen(status))  
   {
     if(!strncmp(status,full,strlen(status)))
@@ -878,16 +880,35 @@ draw_battery_status(const char* status) {
     }
     else if(!strncmp(status,charging,strlen(status)))
     {
-      red = 0;
-      green = 255;
-      blue = 127;
+      if(safemode)
+      {
+        red = menu_color.r;
+        green = menu_color.g;
+        blue = menu_color.b;
+      }
+      else
+      {
+        red = danger_color.r;
+        green = danger_color.g;
+        blue = danger_color.b;
+      }
+
       parsed = "charging";
     }
     else if(!strncmp(status,discharging,strlen(status)))
     {
-      red = 0;
-      green = 255;
-      blue = 127;
+      if(safemode)
+      {
+        red = menu_color.r;
+        green = menu_color.g;
+        blue = menu_color.b;
+      }
+      else
+      {
+        red = danger_color.r;
+        green = danger_color.g;
+        blue = danger_color.b;
+      }
       parsed = "discharging";
     }
     else if(!strncmp(status,unknown,strlen(status)))
@@ -922,9 +943,9 @@ draw_battery_level(const char* level) {
  
   int level_length = strlen(level);
  
-  int red;
-  int green;
-  int blue;  
+  unsigned char red;
+  unsigned char green;
+  unsigned char blue;  
   char level_text[5];
 
   int number=atoi(level);  
@@ -955,11 +976,6 @@ draw_battery_level(const char* level) {
     blue = 0;
   }  
   
-  battery_color.r = red;
-  battery_color.g = green;
-  battery_color.b = blue;
-  battery_color.a = 255;
-
   if(number)
   {
     sprintf(level_text,"%d%%",number); 
@@ -969,7 +985,7 @@ draw_battery_level(const char* level) {
     sprintf(level_text,"???%%");
   }
 
-  gr_color(battery_color.r, battery_color.g, battery_color.b, battery_color.a);
+  gr_color(red, green, blue, 255);
   
   if (level[0] != '\0')
   {
@@ -1104,6 +1120,7 @@ static void draw_screen_locked(void)
     }
 	    
     if (show_text) {
+	int safemode = get_safe_mode();
         gr_color(background_color.r, background_color.g, background_color.b, background_color.a);
         gr_fill(0, 0, gr_fb_width(), gr_fb_height());
 
@@ -1111,13 +1128,13 @@ static void draw_screen_locked(void)
         int j = 0;
         int row = 0;            // current row that we are drawing on
         if (show_menu) {
-            if(get_safe_mode()){
+            if(safemode){
           gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
             /*gr_fill(0, (menu_top + menu_sel - menu_show_start) * CHAR_HEIGHT,
                     gr_fb_width(), ((menu_top + menu_sel - menu_show_start +1)*CHAR_HEIGHT+1);*/
 
-            if(get_safe_mode()){
+            if(safemode){
           gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
             for (i = 0; i < menu_top; ++i) {
@@ -1130,7 +1147,7 @@ static void draw_screen_locked(void)
             else
                 j = menu_items - menu_show_start;
 
-            if(get_safe_mode()){
+            if(safemode){
           gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
             for (i = menu_show_start + menu_top; i < (menu_show_start + menu_top + j); ++i) {
@@ -1153,7 +1170,7 @@ static void draw_screen_locked(void)
 		    draw_text_line(i - menu_show_start , charp, SELECTION_OFFSET);
 		    
 		    // choose color based on safe/non-safe mode
-		    if(get_safe_mode()) {
+		    if(safemode) {
           	        gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         	    } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
 		   
@@ -1165,7 +1182,7 @@ static void draw_screen_locked(void)
 
                 } else {
                     
-		   if(get_safe_mode()){
+		   if(safemode){
           		gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         	   } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);
                    draw_text_line(i - menu_show_start, menu[i], 0);
@@ -1187,7 +1204,7 @@ static void draw_screen_locked(void)
 		draw_battery_level(bat_level);
 	        draw_battery_status(bat_status);
             	// line across the top of the menu
-		if(get_safe_mode()){
+		if(safemode){
 		    gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
 		} else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);  
 	    	gr_fill((1*CHAR_WIDTH+4), 0, (gr_fb_width()-((2*CHAR_WIDTH)-2)), 1);
@@ -1195,7 +1212,7 @@ static void draw_screen_locked(void)
 	    else
 		draw_warning_skulls();
         }
-        if(get_safe_mode()){
+        if(safemode){
             gr_color(menu_color.r, menu_color.g, menu_color.b, menu_color.a);
         } else gr_color(danger_color.r, danger_color.g, danger_color.b, danger_color.a);  
 	

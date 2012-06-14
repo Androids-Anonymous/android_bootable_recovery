@@ -3,8 +3,9 @@
 #ifndef SAFE_SYSTEM_FILE
 #define SAFE_SYSTEM_FILE "/systemorig/etc/safestrap/flags/alt_system_mode"
 #endif
-
-extern int safemode;
+#ifndef DUPE_SAFE_SYSTEM_FILE
+#define DUPE_SAFE_SYSTEM_FILE "/.alt_system_mode"
+#endif
 
 int check_systemorig_mount();
 int get_safe_mode();

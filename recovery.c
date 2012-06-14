@@ -567,7 +567,7 @@ int compare_string(const void* a, const void* b) {
 }
 
 void prompt_and_wait() {
-    safemode = get_safe_mode();
+    int safemode = get_safe_mode();
     char** headers = NULL;
     
     for (;;) {

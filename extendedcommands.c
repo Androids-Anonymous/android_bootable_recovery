@@ -55,6 +55,7 @@ int poweroff = 0;
 int signature_check_enabled = 1;
 int script_assert_enabled = 1;
 static const char *SDCARD_UPDATE_FILE = "/sdcard/update.zip";
+int safemode;
 
 int
 open_pipe(const char *pathtoprog)
@@ -798,7 +799,7 @@ void show_nandroid_restore_menu(const char* path)
         LOGE("can't mount %s\n", path);
         return;
     }
-
+    int safemode = get_safe_mode();
     int restore_webtop = 0;
     char** headers = NULL;
     char** headers_nanr[] = {  "|| choose the image |/____________________________,/|",
@@ -1280,46 +1281,50 @@ void show_partition_menu()
 					sprintf(&mount_menue[mountable_volumes].mount, "|| <3> mount %s                                 |/|", v->mount_point);
 					sprintf(&mount_menue[mountable_volumes].unmount, "|| <3> unmount %s                               |/|", v->mount_point);
 }
+				if(strcmp("\/pds", v->mount_point) == 0) {
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <4> mount %s                                 |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].unmount, "|| <4> unmount %s                               |/|", v->mount_point);
+}
 
 				if(strcmp("\/systemorig", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <4> mount %s                          |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <4> unmount %s                        |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <5> mount %s                          |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <5> unmount %s                        |/|", v->mount_point);
 }
 
 				if(strcmp("\/cache", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <5> mount %s                               |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <5> unmount %s                             |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <6> mount %s                               |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <6> unmount %s                             |/|", v->mount_point);
 }
 
 				if(strcmp("\/system", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <6> mount %s                              |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <6> unmount %s                            |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <7> mount %s                              |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <7> unmount %s                            |/|", v->mount_point);
 }
 
 				if(strcmp("\/data", v->mount_point) == 0) {
-					sprintf(&mount_menue[mountable_volumes].mount, "|| <7> mount %s                                |/|", v->mount_point);
-                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <7> unmount %s                              |/|", v->mount_point);
+					sprintf(&mount_menue[mountable_volumes].mount, "|| <8> mount %s                                |/|", v->mount_point);
+                                	sprintf(&mount_menue[mountable_volumes].unmount, "|| <8> unmount %s                              |/|", v->mount_point);
 }
 				mount_menue[mountable_volumes].v = &device_volumes[i];
 				++mountable_volumes;
 				if (is_safe_to_format(v->mount_point)) {
 					if(strcmp("\/sdcard", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <8> format %s                             |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <9> format %s                             |/|",v->mount_point);
 					}
 					if(strcmp("\/emmc", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <9> format %s                               |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <0> format %s                               |/|",v->mount_point);
 					}
 					if(strcmp("\/osh", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <0> format %s                                |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <A> format %s                                |/|",v->mount_point);
 					}
 					if(strcmp("\/cache", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <A> format %s                              |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <B> format %s                              |/|",v->mount_point);
 					}
 					if(strcmp("\/system", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <B> format %s                             |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <C> format %s                             |/|",v->mount_point);
 					}
 					if(strcmp("\/data", v->mount_point) == 0) {
-						sprintf(&format_menue[formatable_volumes].txt, "|| <C> format %s                               |/|",v->mount_point);
+						sprintf(&format_menue[formatable_volumes].txt, "|| <D> format %s                               |/|",v->mount_point);
 					}
 
 					format_menue[formatable_volumes].v = &device_volumes[i];
@@ -1328,7 +1333,7 @@ void show_partition_menu()
 		    }
 		    else if (strcmp("ramdisk", v->fs_type) != 0 && strcmp("mtd", v->fs_type) == 0 && is_safe_to_format(v->mount_point))
 		    {
-				sprintf(&format_menue[formatable_volumes].txt, "|| <C> format %s                            |/|", v->mount_point);
+				sprintf(&format_menue[formatable_volumes].txt, "|| <D> format %s                            |/|", v->mount_point);
 				format_menue[formatable_volumes].v = &device_volumes[i];
 				++formatable_volumes;
 			}
@@ -1365,13 +1370,15 @@ void show_partition_menu()
 			options[mountable_volumes+i] = e->txt;
 		}
 
-        options[mountable_volumes+formatable_volumes] = "|| <D> mount USB storage                          |/|";
+        options[mountable_volumes+formatable_volumes] = "|| <E> mount USB storage                          |/|";
         options[mountable_volumes+formatable_volumes + 1] = NULL;
 
         int chosen_item = get_menu_selection(headers, &options, 0, 0, 0, 0);
 	if (chosen_item == GO_BACK)
+	{
     	    ui_set_showing_warning(0);
             return;
+	}
         if (chosen_item == (mountable_volumes+formatable_volumes))
         {
             show_mount_usb_storage_menu();
@@ -1397,17 +1404,28 @@ void show_partition_menu()
             chosen_item = chosen_item - mountable_volumes;
             FormatMenuEntry* e = &format_menue[chosen_item];
             Volume* v = e->v;
+	    char formatpath[256];
+
+    	    snprintf(formatpath, (strlen("|+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|")+1), "|| <8> yes - format %-27.27s   |/|", v->mount_point );
 
             //sprintf(confirm_string, "%s - %s", v->mount_point, confirm_format);
+	    ui_set_showing_warning(1);
 
-            if (!confirm_selection(confirm_format, confirm_f))
+            if (!confirm_selection(confirm_format, formatpath))
+	    {
                 ui_set_showing_warning(0);
 	   	continue;
+	    }
+	    ui_set_showing_warning(0);
             ui_print("formatting %s...\n", v->mount_point);
-            if (0 != format_volume(v->mount_point))
+            if (0 != format_volume(v->mount_point)){
+                ui_set_showing_warning(0);
                 ui_print("error formatting %s.\n", v->mount_point);
-            else
+	    }
+	    else {
+                ui_set_showing_warning(0);
                 ui_print("done.\n");
+	    }
         }
     }
 
@@ -1441,8 +1459,10 @@ void show_nandroid_advanced_restore_menu(const char* path)
 
     char* file = choose_file_menu(tmp, NULL, advancedheaders);
     if (file == NULL)
+    {
     	ui_set_showing_warning(0);
         return;
+    }
     char** headers = NULL;
     char* headers_adv[] = {  "|| advanced restore |/____________________________,/|",
 			     "||-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+|/|",
@@ -1904,6 +1924,7 @@ void show_advanced_menu(int safemode_enabled)
 		}
 	    break;
 	    }
+	    
         }
     }
 }
@@ -1959,6 +1980,7 @@ void create_fstab()
 #ifdef BOARD_HAS_WEBTOP
     write_fstab_root("/osh", file);
 #endif
+    write_fstab_root("/pds", file);
     fclose(file);
     LOGI("completed outputting fstab.\n");
 }

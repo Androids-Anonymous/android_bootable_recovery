@@ -218,4 +218,7 @@ void ui_console_set_front_color(unsigned char r, unsigned char g, unsigned char 
 //prints to console
 void ui_console_print(const char *text);
 
+//checks for "alt_system_mode" flag
+int get_safe_mode();
+
 #endif  // RECOVERY_COMMON_H
